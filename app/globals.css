@@ -1,0 +1,37 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+}
+
+html, body {
+  height: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+
+body {
+  @apply bg-slate-50 font-sans text-ink antialiased;
+}
+
+@keyframes sheet-up {
+  from { transform: translateY(24px); opacity: 0; }
+  to { transform: translateY(0); opacity: 1; }
+}
+.animate-sheet-up { animation: sheet-up 0.18s ease-out; }
+
+/* MapLibre – úpravy ovládacích prvků */
+.maplibregl-ctrl-group { border-radius: 14px !important; box-shadow: 0 4px 14px rgba(15, 23, 42, 0.15) !important; }
+.maplibregl-ctrl-group button { width: 38px !important; height: 38px !important; }
+.maplibregl-ctrl-bottom-right { bottom: 84px; }
+.maplibregl-ctrl-bottom-left { bottom: 0; }
+@media (min-width: 768px) { .maplibregl-ctrl-bottom-right { bottom: 0; } }
+.maplibregl-popup-content { border-radius: 14px; padding: 12px 14px; font-size: 13px; line-height: 1.45; box-shadow: 0 8px 30px rgba(15,23,42,0.18); }
+.maplibregl-ctrl-attrib { font-size: 10px; }
+
+.prose-cz p { margin: 0.5rem 0; }
+.prose-cz h2 { font-size: 1.15rem; font-weight: 700; margin: 1.25rem 0 0.5rem; }
+.prose-cz ul { list-style: disc; padding-left: 1.25rem; margin: 0.5rem 0; }
+.prose-cz li { margin: 0.2rem 0; }
+.prose-cz a { color: #1d7559; text-decoration: underline; }

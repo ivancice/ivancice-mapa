@@ -1,0 +1,10 @@
+{
+  "name": "Ivančice očima pěších a cyklistů",
+  "short_name": "Ivančice mapa",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#1d7559",
+  "lang": "cs",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}
