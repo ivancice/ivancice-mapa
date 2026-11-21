@@ -9,7 +9,8 @@ import { Button, CategoryBadge, Field, inputCls, Modal, Sheet, Spinner, toast } 
 import { formatArea, formatDate, formatLength, lastName, plural, rememberName } from '@/lib/geo';
 import { photoUrl, reportUrl } from '@/lib/env';
 import { ensureSession } from '@/lib/auth';
-import { uploadPhoto } from '@/lib/photos';
+import { deleteStoragePhotos, uploadPhoto } from '@/lib/photos';
+import { adminApi } from '@/lib/adminApi';
 
 const FLAG_REASONS: Record<string, string> = {
   spam: 'Spam nebo reklama',
@@ -45,6 +46,8 @@ export function ReportDetailPanel({
   const [cBusy, setCBusy] = useState(false);
   const [flagOpen, setFlagOpen] = useState<{ comment?: string; photo?: string } | null>(null);
   const [editOpen, setEditOpen] = useState(false);
+  const [adminEdit, setAdminEdit] = useState(false);
+  const isAdmin = !!profile?.is_admin;
   const [photo, setPhoto] = useState<string | null>(null);
 
   const load = useCallback(async () => {
@@ -151,10 +154,10 @@ export function ReportDetailPanel({
   return (
     <Sheet open onClose={onClose} wide z={35}
       title={
-        <div className="flex flex-col items-center pl-7 text-center">
+        <div className="flex flex-col items-center pl-7 pt-4 text-center">
           {cat && <CategoryBadge color={cat.color} icon={cat.icon} size="lg" />}
           <div className="mt-2 text-xs font-semibold" style={{ color: cat?.color }}>{cat?.name}</div>
-          <div className="mt-0.5 text-xl leading-snug">{r.title}</div>
+          <div className="mt-1 text-2xl font-extrabold leading-tight">{r.title}</div>
           {(r.district || (sub && sub.name !== r.title)) && (
             <div className="mt-1 flex items-center gap-1 text-sm font-normal text-ink-soft">
               <MapPin className="h-3.5 w-3.5 shrink-0" />{[r.district, sub && sub.name !== r.title ? sub.name : null].filter(Boolean).join(' · ')}
@@ -166,7 +169,14 @@ export function ReportDetailPanel({
       {r.is_demo && <div className="mb-3 rounded-xl bg-amber-100 px-3 py-2 text-xs font-semibold text-amber-900">UKÁZKOVÝ PODNĚT – testovací data, nejde o skutečný příspěvek obyvatel.</div>}
       {r.is_hidden && <div className="mb-3 rounded-xl bg-slate-200 px-3 py-2 text-xs font-semibold">Tento podnět je skrytý a veřejnost ho nevidí.</div>}
 
-      <div className="mt-2 flex items-center gap-3 rounded-2xl p-3" style={{ backgroundColor: `${cat?.color ?? '#64748b'}1f` }}>
+      {r.custom_topic && <p className="mt-2 text-center text-sm"><b>Téma:</b> {r.custom_topic}</p>}
+      {r.description ? (
+        <p className="mt-2 whitespace-pre-line text-center text-[15px] leading-relaxed text-ink">{r.description}</p>
+      ) : (r.is_mine || isAdmin) && (
+        <p className="mt-2 text-center text-sm"><button className="font-semibold text-brand-700 underline" onClick={() => (r.is_mine ? setEditOpen(true) : setAdminEdit(true))}>+ Doplnit popis problému</button></p>
+      )}
+
+      <div className="mt-4 flex items-center gap-3 rounded-2xl p-3" style={{ backgroundColor: `${cat?.color ?? '#64748b'}1f` }}>
         <div className="min-w-[2rem] text-center text-2xl font-extrabold" style={{ color: cat?.color }}>{r.people}</div>
         <div className="min-w-0 flex-1 text-sm leading-snug">
           <b>{plural(r.people, 'člověk to vnímá', 'lidé to vnímají', 'lidí to vnímá')} jako problém</b>
@@ -188,8 +198,6 @@ export function ReportDetailPanel({
         </div>
       )}
 
-      {r.custom_topic && <p className="mt-3 text-sm"><b>Téma:</b> {r.custom_topic}</p>}
-      {r.description && <p className="mt-3 whitespace-pre-line text-[15px] leading-relaxed">{r.description}</p>}
       {r.solution && (
         <div className="mt-3 rounded-2xl border-l-4 border-brand-500 bg-brand-50 p-3 text-sm">
           <div className="mb-0.5 font-semibold text-brand-800">Návrh řešení</div>
@@ -295,6 +303,20 @@ export function ReportDetailPanel({
         </div>
       )}
 
+      {isAdmin && (
+        <div className="mt-4 flex flex-wrap items-center gap-2 rounded-2xl bg-amber-50 p-3 text-sm">
+          <span className="flex-1 font-semibold text-amber-900">Správce</span>
+          <Button variant="outline" className="px-3 py-1.5" onClick={() => setAdminEdit(true)}><Pencil className="h-4 w-4" /> Upravit</Button>
+          <Button variant="ghost" className="px-3 py-1.5" onClick={async () => {
+            try { await adminApi.updateReport(r.id, { is_hidden: !r.is_hidden, hidden_reason: r.is_hidden ? null : 'Skryto správcem' }); toast(r.is_hidden ? 'Zveřejněno' : 'Skryto'); load(); onChanged(); } catch (e) { toast(errorMessage(e), 'error'); }
+          }}>{r.is_hidden ? 'Zveřejnit' : 'Skrýt'}</Button>
+          <Button variant="ghost" className="px-3 py-1.5 text-red-600" onClick={async () => {
+            if (!confirm('Trvale smazat podnět včetně komentářů a fotografií? Nelze vrátit.')) return;
+            try { const res = await adminApi.deleteReport(r.id); await deleteStoragePhotos(res.photo_paths ?? []); toast('Smazáno'); onChanged(); onClose(); } catch (e) { toast(errorMessage(e), 'error'); }
+          }}><Trash2 className="h-4 w-4" /> Smazat</Button>
+        </div>
+      )}
+
       <section className="mt-5">
         <h3 className="text-sm font-bold">Komentáře ({r.comments.length})</h3>
         <ul className="mt-2 space-y-2">
@@ -302,7 +324,10 @@ export function ReportDetailPanel({
             <li key={c.id} className={clsx('rounded-2xl bg-slate-50 p-3 text-sm', c.is_hidden && 'opacity-50')}>
               <div className="flex items-center gap-2 text-xs text-ink-soft">
                 <b className="text-ink">{c.author_name}</b> · {formatDate(c.created_at)}
-                <button className="ml-auto text-ink-faint hover:text-red-600" onClick={() => setFlagOpen({ comment: c.id })} aria-label="Nahlásit komentář"><Flag className="h-3.5 w-3.5" /></button>
+                {isAdmin && <button className="ml-auto text-xs font-semibold text-red-700 underline" onClick={async () => {
+                  try { await adminApi.setCommentHidden(c.id, !c.is_hidden); toast(c.is_hidden ? 'Komentář zveřejněn' : 'Komentář skryt'); load(); } catch (e) { toast(errorMessage(e), 'error'); }
+                }}>{c.is_hidden ? 'Zveřejnit' : 'Skrýt'}</button>}
+                <button className={clsx(!isAdmin && 'ml-auto', 'text-ink-faint hover:text-red-600')} onClick={() => setFlagOpen({ comment: c.id })} aria-label="Nahlásit komentář"><Flag className="h-3.5 w-3.5" /></button>
               </div>
               <p className="mt-1 whitespace-pre-line">{c.body}</p>
               {c.photos.map((p) => (
@@ -329,6 +354,7 @@ export function ReportDetailPanel({
       </section>
 
       {flagOpen && <FlagModal reportId={r.id} commentId={flagOpen.comment} photoId={flagOpen.photo} onClose={() => setFlagOpen(null)} />}
+      {adminEdit && <AdminEditModal r={r} config={config} onClose={() => setAdminEdit(false)} onSaved={() => { setAdminEdit(false); load(); onChanged(); }} />}
       {editOpen && <EditOwnModal r={r} onClose={() => setEditOpen(false)} onSaved={() => { setEditOpen(false); load(); onChanged(); }} />}
       {photo && (
         <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/90 p-4" onClick={() => setPhoto(null)}>
@@ -385,9 +411,50 @@ function EditOwnModal({ r, onClose, onSaved }: { r: RD; onClose: () => void; onS
       }}>Uložit</Button></>}>
       <div className="space-y-3">
         <Field label="Název" required><input className={inputCls} value={title} onChange={(e) => setTitle(e.target.value)} maxLength={140} /></Field>
-        <Field label="Komentář"><textarea className={clsx(inputCls, 'min-h-[90px]')} value={desc} onChange={(e) => setDesc(e.target.value)} maxLength={3000} /></Field>
+        <Field label="Popis problému"><textarea className={clsx(inputCls, 'min-h-[90px]')} value={desc} onChange={(e) => setDesc(e.target.value)} maxLength={3000} /></Field>
         <Field label="Návrh řešení"><textarea className={clsx(inputCls, 'min-h-[70px]')} value={sol} onChange={(e) => setSol(e.target.value)} maxLength={3000} /></Field>
         <p className="text-xs text-ink-soft">Zakreslení nelze měnit – pokud chcete jiný rozsah, vytvořte novou variantu.</p>
+      </div>
+    </Modal>
+  );
+}
+
+function AdminEditModal({ r, config, onClose, onSaved }: { r: RD; config: PublicConfig; onClose: () => void; onSaved: () => void }) {
+  const [title, setTitle] = useState(r.title);
+  const [desc, setDesc] = useState(r.description ?? '');
+  const [sol, setSol] = useState(r.solution ?? '');
+  const [cat, setCat] = useState<number>(r.category_id);
+  const [sub, setSub] = useState<number | ''>(r.subcategory_id ?? '');
+  const [busy, setBusy] = useState(false);
+  const cats = config.categories.filter((c) => !c.requires_approval || c.id === r.category_id);
+  const subs = config.categories.find((c) => c.id === cat)?.subcategories ?? [];
+  return (
+    <Modal open onClose={onClose} title="Upravit podnět (správce)"
+      footer={<><Button variant="ghost" onClick={onClose}>Zrušit</Button><Button variant="primary" loading={busy} onClick={async () => {
+        setBusy(true);
+        try {
+          await adminApi.updateReport(r.id, { title, description: desc, solution: sol, category_id: cat, subcategory_id: sub === '' ? '' : sub });
+          toast('Uloženo'); onSaved();
+        } catch (e) { toast(errorMessage(e), 'error'); } finally { setBusy(false); }
+      }}>Uložit</Button></>}>
+      <div className="space-y-3">
+        <Field label="Název" required><input className={inputCls} value={title} onChange={(e) => setTitle(e.target.value)} maxLength={140} /></Field>
+        <Field label="Kategorie">
+          <select className={inputCls} value={cat} onChange={(e) => { setCat(Number(e.target.value)); setSub(''); }}>
+            {cats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+        </Field>
+        {subs.length > 0 && (
+          <Field label="Podkategorie">
+            <select className={inputCls} value={sub} onChange={(e) => setSub(e.target.value === '' ? '' : Number(e.target.value))}>
+              <option value="">– bez podkategorie –</option>
+              {subs.map((s) => <option key={s.id} value={s.id}>{s.name}</option>)}
+            </select>
+          </Field>
+        )}
+        <Field label="Popis problému"><textarea className={clsx(inputCls, 'min-h-[90px]')} value={desc} onChange={(e) => setDesc(e.target.value)} maxLength={3000} /></Field>
+        <Field label="Návrh řešení"><textarea className={clsx(inputCls, 'min-h-[70px]')} value={sol} onChange={(e) => setSol(e.target.value)} maxLength={3000} /></Field>
+        <p className="text-xs text-ink-soft">Úprava se zapíše do historie změn. Autor u podnětu zůstává.</p>
       </div>
     </Modal>
   );

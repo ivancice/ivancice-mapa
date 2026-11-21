@@ -361,10 +361,11 @@ export default function MapApp({ embed = false }: { embed?: boolean }) {
       )}
 
       {/* hlavní tlačítko */}
-      {step === null && !selected && !chooser && !filtersOpen && config && (
-        <div className="absolute inset-x-0 bottom-0 z-20 flex justify-center p-3 pb-[max(1rem,env(safe-area-inset-bottom))] md:bottom-4 md:justify-start md:pl-4">
+      {step === null && !chooser && !filtersOpen && config && (
+        <div className={clsx('absolute inset-x-0 bottom-0 z-20 justify-center p-3 pb-[max(1rem,env(safe-area-inset-bottom))] md:bottom-4 md:flex md:justify-start md:pl-4', selected ? 'hidden' : 'flex')}>
           {contributionsOpen ? (
-            <button onClick={startAdd} className="flex items-center gap-2 rounded-full bg-brand-600 px-6 py-3.5 text-base font-bold text-white shadow-panel transition hover:bg-brand-700 active:scale-95">
+            <button onClick={startAdd} disabled={!!selected} title={selected ? 'Nejprve zavřete otevřený podnět (křížek vpravo nahoře)' : undefined}
+              className="flex items-center gap-2 rounded-full bg-brand-600 px-6 py-3.5 text-base font-bold text-white shadow-panel transition hover:bg-brand-700 active:scale-95 disabled:cursor-not-allowed disabled:bg-slate-400 disabled:shadow-none disabled:active:scale-100">
               <Plus className="h-5 w-5" /> Přidat podnět
             </button>
           ) : (
