@@ -1,0 +1,45 @@
+# Konfigurace pro lokální vývoj pomocí Supabase CLI (`supabase start`).
+# Pro produkční projekt nastavte stejné volby v Supabase Dashboardu (viz README).
+project_id = "ivancice-mapa"
+
+[api]
+enabled = true
+port = 54321
+schemas = ["public"]
+extra_search_path = ["public", "extensions"]
+max_rows = 10000
+
+[db]
+port = 54322
+major_version = 15
+
+[storage]
+enabled = true
+file_size_limit = "6MiB"
+
+[auth]
+enabled = true
+site_url = "http://localhost:3000"
+additional_redirect_urls = ["http://localhost:3000/auth/callback"]
+jwt_expiry = 3600
+enable_signup = true
+enable_anonymous_sign_ins = true
+enable_refresh_token_rotation = true
+
+[auth.email]
+enable_signup = true
+double_confirm_changes = false
+enable_confirmations = false
+max_frequency = "30s"
+
+[auth.email.template.magic_link]
+subject = "Přihlášení do mapy Ivančice očima pěších a cyklistů"
+content_path = "./supabase/templates/magic_link.html"
+
+[auth.email.template.confirmation]
+subject = "Potvrzení e-mailu – Ivančice očima pěších a cyklistů"
+content_path = "./supabase/templates/confirmation.html"
+
+[auth.email.template.email_change]
+subject = "Potvrzení e-mailu – Ivančice očima pěších a cyklistů"
+content_path = "./supabase/templates/email_change.html"

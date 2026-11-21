@@ -75,7 +75,7 @@ Výpočty probíhají v PostGIS (metrická projekce UTM 33N); každý člověk s
 
 Instalace databáze už obsahuje **všech 81 zakreslení z původní mapy** (maphub.net/kristri/ivancice-ocima-pesich-a-cyklistu)
 a jejích **5 původních kategorií** – Nebezpečná místa pro pěší a cyklisty; Nepříjemná nebo odpuzující místa;
-Nedostatečná obytnost, chybějící vybavení; Bariéra prostupnosti / přerušení; Příjemná trasa nebo místo.
+Nedostatečná obytnost, chybějící vybavení; Bariéra prostupnosti / přerušení; Příjemná trasa nebo místo. Migrace 20261121000900 je zařadí do sjednocených kategorií (původní skupiny skryje).
 Jsou označeny „MapHub“ a jako autor je uvedena „Původní mapa (MapHub)“ (migrace `…800_maphub_data.sql`,
 zdrojová data v `data/maphub-puvodni-mapa.geojson`). Nové kategorie ze zadání tvoří rozšíření původního systému.
 Případné pozdější změny na MapHub lze doplnit importem (*Nastavení → Import dat*, export GeoJSON z MapHub).

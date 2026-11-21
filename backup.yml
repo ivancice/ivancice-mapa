@@ -1,0 +1,27 @@
+# Noční záloha databáze jako artefakt GitHub Actions (uchování 30 dní).
+# V repozitáři nastavte secret SUPABASE_DB_URL (Settings → Secrets and variables → Actions).
+name: Záloha databáze
+on:
+  schedule:
+    - cron: '17 2 * * *'
+  workflow_dispatch:
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Instalace PostgreSQL klienta
+        run: |
+          # klient musí být stejné nebo vyšší verze než server (Supabase: PostgreSQL 15/17)
+          sudo apt-get install -y postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y postgresql-client-17
+      - name: Záloha
+        env:
+          DATABASE_URL: ${{ secrets.SUPABASE_DB_URL }}
+        run: ./scripts/backup.sh backups
+      - uses: actions/upload-artifact@v4
+        with:
+          name: zaloha-databaze
+          path: backups/
+          retention-days: 30
