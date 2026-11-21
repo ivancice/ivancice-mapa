@@ -126,7 +126,7 @@ function Profile({ profile, onChanged, onClose, onOpenReport }: { profile: MyPro
             {mine.map((m) => (
               <li key={m.id}>
                 <button className="flex w-full gap-2 py-2 text-left" onClick={() => { onOpenReport(m.id); onClose(); }}>
-                  <span className="min-w-0 flex-1 truncate">{m.title}{m.is_hidden && <span className="ml-1 text-xs text-ink-faint">(skryto)</span>}</span>
+                  <span className="min-w-0 flex-1 truncate">{m.title}{m.pending ? <span className="ml-1 text-xs font-semibold text-amber-700">(čeká na schválení správcem)</span> : m.is_hidden && <span className="ml-1 text-xs text-ink-faint">(skryto)</span>}</span>
                   <span className="shrink-0 text-xs text-ink-faint">{formatDate(m.created_at)} · {m.people}×</span>
                 </button>
               </li>

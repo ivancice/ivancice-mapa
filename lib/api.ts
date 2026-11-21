@@ -15,6 +15,7 @@ const MESSAGES: Record<string, string> = {
   not_authenticated: 'Pro tuto akci je potřeba se přihlásit.',
   blocked: 'Váš účet byl zablokován správcem mapy.',
   forbidden: 'K této akci nemáte oprávnění.',
+  topic_required: 'Napište prosím název kategorie, kterou navrhujete.',
   rate_limit: 'Odesíláte příliš mnoho příspěvků v krátké době. Zkuste to prosím za chvíli.',
   spam_detected: 'Příspěvek byl vyhodnocen jako nevyžádaný obsah. Pokud jde o omyl, upravte text (např. méně odkazů).',
   title_required: 'Vyplňte prosím název podnětu (alespoň 3 znaky).',
@@ -99,7 +100,7 @@ export const api = {
     variant_of?: string | null;
     photos?: { path: string; width: number; height: number }[];
     website?: string;
-  }) => rpc<{ id: string; no: number }>('create_report', { p }),
+  }) => rpc<{ id: string; no: number; pending?: boolean }>('create_report', { p }),
   setSupport: (id: string, support: boolean) =>
     rpc<{ report_id: string; people: number; supporters: number; authors: number; my_support: boolean }>('set_support', {
       p_report: id,
@@ -119,7 +120,7 @@ export const api = {
   updateProfile: (nickname: string | null, email: string | null, newsletter: boolean | null) =>
     rpc<MyProfile>('update_my_profile', { p_nickname: nickname, p_contact_email: email, p_newsletter: newsletter }),
   myReports: () =>
-    rpc<{ id: string; no: number; title: string; kind: GeomKind; category_id: number; created_at: string; is_hidden: boolean; people: number }[]>(
+    rpc<{ id: string; no: number; title: string; kind: GeomKind; category_id: number; created_at: string; is_hidden: boolean; pending?: boolean; custom_topic?: string | null; people: number }[]>(
       'my_reports'
     ),
   updateMyReport: (id: string, title: string, description: string, solution: string) =>

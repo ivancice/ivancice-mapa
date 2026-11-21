@@ -2,9 +2,9 @@
 import { useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import clsx from 'clsx';
-import { Camera, Check, CircleDot, ImagePlus, Pentagon, Spline, ThumbsUp, Trash2, Undo2, X } from 'lucide-react';
+import { Camera, Check, CircleDot, ImagePlus, Lightbulb, Pentagon, Spline, ThumbsUp, Trash2, Undo2, X } from 'lucide-react';
 import type { Category, DrawGeometry, Frequency, GeomKind, MyProfile, NearbyReport, PublicConfig } from '@/lib/types';
-import { FREQUENCY_LABEL, KIND_HINT, KIND_LABEL } from '@/lib/types';
+import { FREQUENCY_LABEL, KIND_HINT, KIND_LABEL, proposalCategory, visibleCategories } from '@/lib/types';
 import { Button, CategoryBadge, Field, inputCls, Modal, Sheet, toast } from '@/components/ui';
 import { api, errorMessage } from '@/lib/api';
 import { ensureSession } from '@/lib/auth';
@@ -37,10 +37,11 @@ export function CategoryStep({
   config, onPick, onClose
 }: { config: PublicConfig; onPick: (catId: number, subId: number | null) => void; onClose: () => void }) {
   const [open, setOpen] = useState<number | null>(null);
+  const proposal = proposalCategory(config);
   return (
     <Sheet open onClose={onClose} title={<>Co chcete označit?<div className="mt-1 text-sm font-normal text-ink-soft">Vyberte téma. Typ zakreslení (bod, linie, plocha) půjde změnit.</div></>}>
       <div className="grid gap-2">
-        {config.categories.map((c) => (
+        {visibleCategories(config).map((c) => (
           <div key={c.id} className={clsx('rounded-2xl border transition', open === c.id ? 'border-slate-300 bg-slate-50' : 'border-slate-200')}>
             <button className="flex w-full items-center gap-3 px-3 py-3 text-left" onClick={() => (c.subcategories.length ? setOpen(open === c.id ? null : c.id) : onPick(c.id, null))}>
               <CategoryBadge color={c.color} icon={c.icon} size="lg" />
@@ -64,6 +65,15 @@ export function CategoryStep({
             )}
           </div>
         ))}
+        {proposal && (
+          <button className="mt-1 flex w-full items-center gap-3 rounded-2xl border border-dashed border-slate-300 px-3 py-3 text-left hover:border-brand-500 hover:bg-brand-50" onClick={() => onPick(proposal.id, null)}>
+            <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-amber-100 text-amber-700"><Lightbulb className="h-5 w-5" /></span>
+            <span className="min-w-0 flex-1">
+              <span className="block font-semibold leading-tight">Chybí vám kategorie? Navrhněte novou</span>
+              <span className="mt-0.5 block text-xs text-ink-soft">Zakreslíte místo a napíšete, jakou kategorii navrhujete. Do mapy se propíše až po schválení správcem.</span>
+            </span>
+          </button>
+        )}
       </div>
     </Sheet>
   );
@@ -158,7 +168,7 @@ export function ReportForm({
   config, draft, geometry, profile, onDone, onBack, onCancel, onCategory
 }: {
   config: PublicConfig; draft: Draft; geometry: DrawGeometry; profile: MyProfile | null;
-  onDone: (r: { id: string; no: number }) => void; onBack: () => void; onCancel: () => void; onCategory: (c: number, s: number | null) => void;
+  onDone: (r: { id: string; no: number; pending?: boolean }) => void; onBack: () => void; onCancel: () => void; onCategory: (c: number, s: number | null) => void;
 }) {
   const cat = config.categories.find((c) => c.id === draft.category_id);
   const [title, setTitle] = useState(draft.title ?? (draft.subcategory_id ? cat?.subcategories.find((s) => s.id === draft.subcategory_id)?.name ?? '' : ''));
@@ -184,6 +194,7 @@ export function ReportForm({
     e.preventDefault();
     setErr(null);
     if (!draft.category_id) return setErr('Vyberte prosím kategorii.');
+    if (cat?.requires_approval && topic.trim().length < 2) return setErr('Napište prosím název kategorie, kterou navrhujete.');
     if (title.trim().length < 3) return setErr('Vyplňte prosím název podnětu (alespoň 3 znaky).');
     if (!name.trim()) return setErr('Vyplňte prosím jméno nebo přezdívku.');
     if (Date.now() - started.current < 2500) return setErr('Formulář byl odeslán příliš rychle. Zkuste to prosím znovu.');
@@ -229,9 +240,15 @@ export function ReportForm({
         )}
         <Field label="Kategorie" required>
           <select className={inputCls} value={draft.category_id ?? ''} onChange={(e) => onCategory(Number(e.target.value), null)}>
-            {config.categories.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+            {[...visibleCategories(config), ...(cat?.requires_approval ? [cat] : [])].map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
           </select>
         </Field>
+        {cat?.requires_approval && (
+          <div className="rounded-2xl bg-amber-50 p-3 text-sm text-amber-900">
+            <b>Návrh nové kategorie podléhá schválení správcem.</b> Podnět se uloží hned, ale v mapě se zobrazí až poté,
+            co ho správce schválí – buď jako novou kategorii, nebo ho zařadí do některé stávající.
+          </div>
+        )}
         {cat && cat.subcategories.length > 0 && (
           <Field label="Podkategorie">
             <select className={inputCls} value={draft.subcategory_id ?? ''} onChange={(e) => {
@@ -246,7 +263,7 @@ export function ReportForm({
           </Field>
         )}
         {cat?.allow_custom_topic && (
-          <Field label="Vlastní téma" hint="Např. hluk, odpadky, osvětlení hřiště…">
+          <Field label={cat.requires_approval ? 'Název navrhované kategorie' : 'Vlastní téma'} required={cat.requires_approval} hint="Např. veřejné osvětlení, odpadky, hluk…">
             <input className={inputCls} value={topic} onChange={(e) => setTopic(e.target.value)} maxLength={120} />
           </Field>
         )}
@@ -327,8 +344,18 @@ export function ReportForm({
 }
 
 // --- 5. potvrzení ------------------------------------------------------------------
-export function SuccessModal({ no, id, verified, onClose, onLogin, onShow }: { no: number; id: string; verified: boolean; onClose: () => void; onLogin: () => void; onShow: () => void }) {
+export function SuccessModal({ no, id, verified, pending, onClose, onLogin, onShow }: { no: number; id: string; verified: boolean; pending?: boolean; onClose: () => void; onLogin: () => void; onShow: () => void }) {
   const url = typeof window !== 'undefined' ? reportUrl(id) : '';
+  if (pending) {
+    return (
+      <Modal open onClose={onClose} title="Děkujeme za návrh!" footer={<Button variant="primary" onClick={onClose}>Pokračovat</Button>}>
+        <div className="flex items-center gap-3 rounded-2xl bg-amber-50 p-4 text-amber-900">
+          <Lightbulb className="h-8 w-8 shrink-0 rounded-full bg-amber-500 p-1.5 text-white" />
+          <div>Váš podnět <b>č. {no}</b> s návrhem nové kategorie je uložen a <b>čeká na schválení správcem</b>. V mapě se zobrazí, jakmile ho správce schválí. Stav najdete v části „Můj účet“ → Moje podněty.</div>
+        </div>
+      </Modal>
+    );
+  }
   return (
     <Modal open onClose={onClose} title="Děkujeme, podnět byl přidán!"
       footer={<><Button variant="outline" onClick={onShow}>Zobrazit v mapě</Button><Button variant="primary" onClick={onClose}>Pokračovat</Button></>}>

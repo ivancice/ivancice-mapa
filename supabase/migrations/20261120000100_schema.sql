@@ -59,6 +59,8 @@ create table if not exists public.categories (
   updated_at    timestamptz not null default now()
 );
 
+alter table public.categories add column if not exists requires_approval boolean not null default false;  -- návrhy nových kategorií: podněty čekají na schválení správcem
+
 create table if not exists public.subcategories (
   id            serial primary key,
   category_id   integer not null references public.categories(id) on delete cascade,

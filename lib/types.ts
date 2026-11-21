@@ -23,6 +23,7 @@ export interface Category {
   default_geom: GeomKind;
   sort_order: number;
   allow_custom_topic: boolean;
+  requires_approval?: boolean;
   theme: string;
   source: string;
   is_active?: boolean;
@@ -214,3 +215,11 @@ export const FREQUENCY_LABEL: Record<Frequency, string> = {
   sometimes: 'Občas',
   rarely: 'Výjimečně'
 };
+
+/** Kategorie pro veřejnost (bez „Návrhu nové kategorie“, jehož podněty čekají na schválení). */
+export function visibleCategories(config: PublicConfig): Category[] {
+  return config.categories.filter((c) => !c.requires_approval);
+}
+export function proposalCategory(config: PublicConfig): Category | undefined {
+  return config.categories.find((c) => c.requires_approval);
+}

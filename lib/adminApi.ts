@@ -25,6 +25,7 @@ export const adminApi = {
   deletePhoto: (id: string) => rpc<{ path: string }>('admin_delete_photo', { p_id: id }),
   resolveFlag: (id: string, res: string) => rpc('admin_resolve_flag', { p_id: id, p_resolution: res }),
   categories: () => rpc<Category[]>('admin_list_categories'),
+  approveProposal: (id: string, categoryId: number | null, name: string | null) => rpc<{ category_id: number }>('admin_approve_proposal', { p_id: id, p_category_id: categoryId, p_name: name, p_color: null }),
   saveCategory: (p: Record<string, unknown>) => rpc<{ id: number }>('admin_save_category', { p }),
   deleteCategory: (id: number) => rpc<{ deleted?: boolean; deactivated?: boolean }>('admin_delete_category', { p_id: id }),
   reorderCategories: (ids: number[]) => rpc('admin_reorder_categories', { p_ids: ids }),

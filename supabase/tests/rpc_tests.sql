@@ -17,6 +17,8 @@ delete from public.categories where name in ('Původní skupina', 'Testovací ka
 delete from public.supports where user_id::text like '00000000-0000-0000-0000-0000000000%';
 delete from auth.users where email like '%@test.local' or id = '00000000-0000-0000-0000-0000000000f1';
 
+update public.app_settings set value = 'false' where key = 'contribute_requires_login';
+
 -- uživatelé ---------------------------------------------------------------
 insert into public.admin_emails(email) values ('admin@test.local') on conflict do nothing;
 insert into auth.users (id, email, is_anonymous) values
@@ -90,7 +92,7 @@ reset role;
 update public.app_settings set value = 'false' where key = 'photos_enabled';
 set role authenticated;
 select pg_temp.act('00000000-0000-0000-0000-0000000000f1', true);
-select public.create_report('{"category_id":7,"title":"Bez fotek","author_name":"A","kind":"point","geometry":{"type":"Point","coordinates":[16.3700,49.0950]},"photos":[{"path":"00000000-0000-0000-0000-0000000000f1/b.jpg"}]}')->>'id' as nophoto_id \gset
+select public.create_report('{"category_id":2,"title":"Bez fotek","author_name":"A","kind":"point","geometry":{"type":"Point","coordinates":[16.3700,49.0950]},"photos":[{"path":"00000000-0000-0000-0000-0000000000f1/b.jpg"}]}')->>'id' as nophoto_id \gset
 reset role;
 select pg_temp.check((select count(*) = 0 from public.photos where report_id = :'nophoto_id'), 'vypnuté fotografie se nepřipojí');
 update public.app_settings set value = 'true' where key = 'photos_enabled';
@@ -127,26 +129,26 @@ declare u text; i int := 0;
 begin
   foreach u in array array['00000000-0000-0000-0000-0000000000a1','00000000-0000-0000-0000-0000000000b1','00000000-0000-0000-0000-0000000000c1'] loop
     perform pg_temp.act(u);
-    perform public.create_report(jsonb_build_object('category_id', 5, 'title', 'Nevyužité prostranství ' || i,
+    perform public.create_report(jsonb_build_object('category_id', 2, 'title', 'Nevyužité prostranství ' || i,
       'author_name', 'U' || i, 'kind', 'polygon',
       'geometry', ST_AsGeoJSON(ST_Buffer(ST_SetSRID(ST_MakePoint(16.3800 + i * 0.0007, 49.1030), 4326), 0.001, 8))::jsonb));
     i := i + 1;
   end loop;
 end $$;
 select pg_temp.check(
-  (select max((f->'properties'->>'people')::int) from jsonb_array_elements(public.analysis_polygon_overlap(array[5])->'features') f) = 3,
+  (select max((f->'properties'->>'people')::int) from jsonb_array_elements(public.analysis_polygon_overlap(array[2])->'features') f) = 3,
   'překryv ploch: nejvyšší shoda = 3 lidé');
 select pg_temp.check(
-  (select count(*) from jsonb_array_elements(public.analysis_polygon_overlap(array[5])->'features') f) = 3,
+  (select count(*) from jsonb_array_elements(public.analysis_polygon_overlap(array[2])->'features') f) = 3,
   'překryv ploch: vrstvy pro 1, 2 a 3 lidi');
-select pg_temp.check((public.analysis_polygon_overlap(array[5])->>'total_people')::int = 3, 'překryv ploch: celkem 3 lidé');
+select pg_temp.check((public.analysis_polygon_overlap(array[2])->>'total_people')::int = 3, 'překryv ploch: celkem 3 lidé');
 
 -- stejný člověk zakreslí druhou překrývající se plochu → nesmí se započítat dvakrát
 select pg_temp.act('00000000-0000-0000-0000-0000000000a1');
-select public.create_report(jsonb_build_object('category_id', 5, 'title', 'Totéž znovu', 'author_name', 'Alice', 'kind', 'polygon',
+select public.create_report(jsonb_build_object('category_id', 2, 'title', 'Totéž znovu', 'author_name', 'Alice', 'kind', 'polygon',
   'geometry', ST_AsGeoJSON(ST_Buffer(ST_SetSRID(ST_MakePoint(16.3801, 49.1030), 4326), 0.0009, 8))::jsonb)) \gset
 select pg_temp.check(
-  (select max((f->'properties'->>'people')::int) from jsonb_array_elements(public.analysis_polygon_overlap(array[5])->'features') f) = 3,
+  (select max((f->'properties'->>'people')::int) from jsonb_array_elements(public.analysis_polygon_overlap(array[2])->'features') f) = 3,
   'jeden člověk se v překryvu počítá jednou');
 
 -- 5) Překryvy linií: dvě podobné trasy + jedna kolmá ---------------------------
@@ -266,14 +268,30 @@ reset role;
 select pg_temp.check(not exists (select 1 from auth.users where id = '00000000-0000-0000-0000-0000000000b1'), 'účet smazán');
 select pg_temp.check((select count(*) from public.reports where author_name = 'Anonym') >= 2, 'podněty anonymizovány');
 
+-- návrh nové kategorie (čeká na schválení správcem) --------------------------
+select pg_temp.act('00000000-0000-0000-0000-0000000000a1');
+select pg_temp.expect_error($q$select public.create_report('{"category_id":7,"title":"Bez tématu","author_name":"Alice","kind":"point","geometry":{"type":"Point","coordinates":[16.371,49.099]}}')$q$, 'topic_required');
+select public.create_report('{"category_id":7,"custom_topic":"Test osvětlení","title":"Tma u lávky","author_name":"Alice","kind":"point","geometry":{"type":"Point","coordinates":[16.371,49.099]}}') as prop \gset
+select pg_temp.check(((:'prop')::jsonb->>'pending')::boolean, 'návrh kategorie čeká na schválení');
+select pg_temp.check(not exists (select 1 from jsonb_array_elements(public.get_map_data()->'features') f where f->'properties'->>'id' = (:'prop')::jsonb->>'id'), 'návrh není na veřejné mapě');
+select pg_temp.check(exists (select 1 from jsonb_array_elements(public.my_reports()) x where (x->>'pending')::boolean), 'autor vidí návrh jako čekající');
+select pg_temp.expect_error(format($q$select public.admin_approve_proposal(%L, null, null, null)$q$, (:'prop')::jsonb->>'id'), 'forbidden');
+select pg_temp.act('00000000-0000-0000-0000-00000000000a');
+select pg_temp.check((public.admin_approve_proposal(((:'prop')::jsonb->>'id')::uuid, null, 'Test osvětlení', null)->>'category_id') is not null, 'správce schválil novou kategorii');
+select pg_temp.check(exists (select 1 from jsonb_array_elements(public.get_public_config()->'categories') c where c->>'name' = 'Test osvětlení'), 'nová kategorie je v nabídce');
+select pg_temp.check(not (public.get_report(((:'prop')::jsonb->>'id')::uuid)->>'is_hidden')::boolean, 'podnět je po schválení zveřejněn');
+reset role;
+delete from public.reports where title = 'Tma u lávky';
+delete from public.categories where name = 'Test osvětlení';
+
 -- povinné přihlášení e-mailem ----------------------------------------------
 reset role;
 insert into auth.users (id, email, is_anonymous) values ('00000000-0000-0000-0000-0000000000f2', null, true) on conflict do nothing;
 update public.app_settings set value = 'true' where key = 'contribute_requires_login';
 select pg_temp.act('00000000-0000-0000-0000-0000000000f2', true);
-select pg_temp.expect_error($q$select public.create_report('{"category_id":7,"title":"Anonymní pokus","author_name":"X","kind":"point","geometry":{"type":"Point","coordinates":[16.37,49.09]}}')$q$, 'login_required');
+select pg_temp.expect_error($q$select public.create_report('{"category_id":2,"title":"Anonymní pokus","author_name":"X","kind":"point","geometry":{"type":"Point","coordinates":[16.37,49.09]}}')$q$, 'login_required');
 select pg_temp.act('00000000-0000-0000-0000-0000000000a1');
-select pg_temp.check((public.create_report('{"category_id":7,"title":"Přihlášená Alice","author_name":"Alice","kind":"point","geometry":{"type":"Point","coordinates":[16.37,49.09]}}')->>'id') is not null, 'přihlášený může přidat i při povinném přihlášení');
+select pg_temp.check((public.create_report('{"category_id":2,"title":"Přihlášená Alice","author_name":"Alice","kind":"point","geometry":{"type":"Point","coordinates":[16.37,49.09]}}')->>'id') is not null, 'přihlášený může přidat i při povinném přihlášení');
 reset role;
 update public.app_settings set value = 'false' where key = 'contribute_requires_login';
 delete from auth.users where id = '00000000-0000-0000-0000-0000000000f2';
@@ -285,6 +303,7 @@ delete from public.reports where author_key in (
   '00000000-0000-0000-0000-0000000000f1') or source = 'demo' or author_name = 'Anonym' or title = 'Z původní mapy';
 delete from public.categories where name = 'Původní skupina';
 update public.app_settings set value = 'false' where key = 'show_demo';
+update public.app_settings set value = 'true' where key = 'contribute_requires_login';
 delete from public.flags; delete from public.audit_log;
 delete from auth.users where email like '%@test.local';
 delete from public.admin_emails where email = 'admin@test.local';

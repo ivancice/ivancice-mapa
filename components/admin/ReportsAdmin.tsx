@@ -21,8 +21,10 @@ export default function ReportsAdmin() {
   const [sort, setSort] = useState<'created' | 'people' | 'overlap'>('created');
 
   useEffect(() => {
-    const q = new URLSearchParams(window.location.search).get('q');
+    const sp = new URLSearchParams(window.location.search);
+    const q = sp.get('q');
     if (q) setF((x) => ({ ...x, q }));
+    if (sp.get('v') === 'pending') setF((x) => ({ ...x, visibility: 'pending' }));
   }, []);
 
   const load = useCallback(async () => {
@@ -62,8 +64,24 @@ export default function ReportsAdmin() {
     load();
   }
 
+  async function bulkCategory(value: string) {
+    const [cat, sub] = value.split(':');
+    for (const id of sel) await adminApi.updateReport(id, { category_id: Number(cat), subcategory_id: sub ?? '' });
+    toast(`Přeřazeno ${sel.size} podnětů`);
+    setSel(new Set());
+    load();
+  }
+
+  const [pending, setPending] = useState(0);
+  useEffect(() => { adminApi.reports({ visibility: 'pending', limit: 500 }).then((x) => setPending(x.length)).catch(() => {}); }, [rows]);
+
   return (
     <div className="space-y-3">
+      {pending > 0 && f.visibility !== 'pending' && (
+        <button className="w-full rounded-2xl bg-amber-100 p-3 text-left text-sm text-amber-900" onClick={() => setF({ ...f, visibility: 'pending' })}>
+          <b>{pending} {pending === 1 ? 'návrh nové kategorie čeká' : 'návrhů nových kategorií čeká'} na schválení.</b> Zobrazit →
+        </button>
+      )}
       <div className="flex flex-wrap items-center gap-2">
         <h1 className="mr-auto text-xl font-extrabold">Podněty {rows && <span className="text-base font-semibold text-ink-faint">({rows.length})</span>}</h1>
       </div>
@@ -90,10 +108,10 @@ export default function ReportsAdmin() {
         </select>
         <select className={`${inputCls} py-2`} value={f.visibility} onChange={(e) => setF({ ...f, visibility: e.target.value })}>
           <option value="all">Vše</option><option value="visible">Zveřejněné</option><option value="hidden">Skryté</option>
-          <option value="merged">Sloučené</option><option value="flagged">Nahlášené</option>
+          <option value="merged">Sloučené</option><option value="flagged">Nahlášené</option><option value="pending">Čeká na schválení</option>
         </select>
         <select className={`${inputCls} py-2`} value={f.demo} onChange={(e) => setF({ ...f, demo: e.target.value })}>
-          <option value="all">Skutečné i ukázkové</option><option value="real">Jen skutečné</option><option value="demo">Jen ukázkové</option>
+          <option value="all">Skutečné i ukázkové</option><option value="real">Jen skutečné</option><option value="demo">Jen ukázkové</option><option value="maphub">Jen z původní mapy (MapHub)</option>
         </select>
       </div>
 
@@ -104,6 +122,15 @@ export default function ReportsAdmin() {
           <select className={`${inputCls} w-auto py-1.5`} defaultValue="" onChange={(e) => e.target.value && bulkStatus(e.target.value as ReportStatus)}>
             <option value="">Změnit stav na…</option>
             {(Object.keys(STATUS_LABEL) as ReportStatus[]).map((s) => <option key={s} value={s}>{STATUS_LABEL[s]}</option>)}
+          </select>
+          <select className={`${inputCls} w-auto py-1.5`} value="" onChange={(e) => e.target.value && bulkCategory(e.target.value)}>
+            <option value="">Přeřadit do kategorie…</option>
+            {config.categories.map((c) => (
+              <optgroup key={c.id} label={c.name}>
+                <option value={String(c.id)}>{c.name} (bez podkategorie)</option>
+                {c.subcategories.map((s) => <option key={s.id} value={`${c.id}:${s.id}`}>{s.name}</option>)}
+              </optgroup>
+            ))}
           </select>
           <Button variant="ghost" className="py-1.5" onClick={() => setSel(new Set())}>Zrušit výběr</Button>
         </div>
@@ -130,6 +157,7 @@ export default function ReportsAdmin() {
                   <td className="max-w-[320px] p-2">
                     <button className="block max-w-full truncate text-left font-semibold hover:underline" onClick={() => setEdit(r)}>{r.title}</button>
                     <div className="flex flex-wrap gap-1 text-[11px] text-ink-soft">
+                      {r.hidden_reason === 'pending_approval' && <span className="rounded bg-amber-100 px-1 font-semibold text-amber-800">návrh kategorie: {r.custom_topic} – čeká na schválení</span>}
                       {r.author_name}
                       {r.is_demo && <span className="rounded bg-amber-100 px-1 text-amber-900">ukázka</span>}
                       {r.is_hidden && <span className="rounded bg-slate-200 px-1">skryto</span>}
@@ -190,6 +218,7 @@ function EditReport({ r, onClose, onSaved }: { r: AdminReport; onClose: () => vo
     <Sheet open onClose={onClose} wide z={40} title={<>Podnět č. {r.no}<div className="text-sm font-normal text-ink-soft">{r.author_name}{r.contact_email ? ` · ${r.contact_email}` : ''} · {formatDate(r.created_at)}</div></>}
       footer={<div className="flex gap-2"><Button variant="primary" className="flex-1" onClick={save} loading={busy}>Uložit změny</Button><Link href={`/?p=${r.id}`} target="_blank" className="inline-flex items-center rounded-xl border border-slate-300 px-3 text-sm font-semibold">Detail <ExternalLink className="ml-1 h-4 w-4" /></Link></div>}>
       <div className="space-y-3">
+        {r.hidden_reason === 'pending_approval' && <ProposalPanel r={r} onDone={onSaved} />}
         <Field label="Název" required><input className={inputCls} value={v.title} onChange={(e) => setV({ ...v, title: e.target.value })} /></Field>
         <Field label="Popis"><textarea className={`${inputCls} min-h-[80px]`} value={v.description} onChange={(e) => setV({ ...v, description: e.target.value })} /></Field>
         <Field label="Návrh řešení"><textarea className={inputCls} value={v.solution} onChange={(e) => setV({ ...v, solution: e.target.value })} /></Field>
@@ -237,6 +266,53 @@ function EditReport({ r, onClose, onSaved }: { r: AdminReport; onClose: () => vo
         </div>
       </div>
     </Sheet>
+  );
+}
+
+function ProposalPanel({ r, onDone }: { r: AdminReport; onDone: () => void }) {
+  const { config, reloadConfig } = useAdmin();
+  const [name, setName] = useState(r.custom_topic ?? '');
+  const [target, setTarget] = useState('');
+  const [busy, setBusy] = useState(false);
+  const cats = config.categories.filter((c) => !c.requires_approval);
+  async function approve(categoryId: number | null) {
+    setBusy(true);
+    try {
+      await adminApi.approveProposal(r.id, categoryId, categoryId ? null : name.trim());
+      toast(categoryId ? 'Podnět zařazen a zveřejněn' : 'Kategorie vytvořena, podnět zveřejněn');
+      await reloadConfig();
+      onDone();
+    } catch (e) {
+      toast(errorMessage(e), 'error');
+    } finally {
+      setBusy(false);
+    }
+  }
+  async function reject() {
+    if (!confirm('Zamítnout návrh? Podnět zůstane skrytý.')) return;
+    await adminApi.updateReport(r.id, { hidden_reason: 'Návrh kategorie zamítnut' });
+    toast('Návrh zamítnut');
+    onDone();
+  }
+  return (
+    <div className="space-y-3 rounded-2xl bg-amber-50 p-3 text-sm">
+      <div><b>Návrh nové kategorie čeká na schválení:</b> „{r.custom_topic}“. Podnět se v mapě zobrazí až po schválení.</div>
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="min-w-[200px] flex-1"><span className="mb-1 block text-xs font-semibold">Název nové kategorie</span>
+          <input className={inputCls} value={name} onChange={(e) => setName(e.target.value)} maxLength={120} /></label>
+        <Button variant="primary" disabled={busy || name.trim().length < 2} onClick={() => approve(null)}>Schválit jako novou kategorii</Button>
+      </div>
+      <div className="flex flex-wrap items-end gap-2">
+        <label className="min-w-[200px] flex-1"><span className="mb-1 block text-xs font-semibold">…nebo zařadit do stávající kategorie</span>
+          <select className={inputCls} value={target} onChange={(e) => setTarget(e.target.value)}>
+            <option value="">– vyberte –</option>
+            {cats.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select></label>
+        <Button variant="outline" disabled={busy || !target} onClick={() => approve(Number(target))}>Zařadit a zveřejnit</Button>
+      </div>
+      <button className="text-xs font-semibold text-red-700 underline" onClick={reject}>Zamítnout návrh</button>
+      <p className="text-xs text-ink-soft">Nové kategorii můžete později v části Kategorie nastavit barvu, ikonu a podkategorie.</p>
+    </div>
   );
 }
 

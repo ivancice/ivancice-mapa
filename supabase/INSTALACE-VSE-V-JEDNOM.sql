@@ -67,6 +67,8 @@ create table if not exists public.categories (
   updated_at    timestamptz not null default now()
 );
 
+alter table public.categories add column if not exists requires_approval boolean not null default false;  -- návrhy nových kategorií: podněty čekají na schválení správcem
+
 create table if not exists public.subcategories (
   id            serial primary key,
   category_id   integer not null references public.categories(id) on delete cascade,
@@ -809,7 +811,7 @@ returns jsonb language sql stable security definer set search_path = public, ext
     'categories', coalesce((select jsonb_agg(jsonb_build_object(
         'id', c.id, 'code', c.code, 'name', c.name, 'description', c.description, 'color', c.color,
         'icon', c.icon, 'default_geom', c.default_geom, 'sort_order', c.sort_order,
-        'allow_custom_topic', c.allow_custom_topic, 'theme', c.theme, 'source', c.source,
+        'allow_custom_topic', c.allow_custom_topic, 'requires_approval', c.requires_approval, 'theme', c.theme, 'source', c.source,
         'subcategories', coalesce((select jsonb_agg(jsonb_build_object(
             'id', s.id, 'name', s.name, 'default_geom', s.default_geom, 'sort_order', s.sort_order)
             order by s.sort_order, s.id)
@@ -1107,6 +1109,7 @@ begin
     if v_sub is null then raise exception 'invalid_subcategory' using errcode = 'P0001'; end if;
   end if;
   if not v_cat.allow_custom_topic then v_topic := null; end if;
+  if v_cat.requires_approval and v_topic is null then raise exception 'topic_required' using errcode = 'P0001'; end if;
 
   begin
     v_kind := (p->>'kind')::public.geom_kind;
@@ -1125,13 +1128,15 @@ begin
   perform public._upsert_profile(uid, v_name, p->>'email', (p->>'newsletter')::boolean);
 
   insert into public.reports (user_id, author_key, author_name, category_id, subcategory_id, custom_topic,
-                              title, description, solution, frequency, geom, geom_kind, variant_of, is_demo)
-  values (uid, uid, v_name, v_cat.id, v_sub, v_topic, v_title, v_desc, v_sol, v_freq, v_geom, v_kind, v_variant, false)
+                              title, description, solution, frequency, geom, geom_kind, variant_of, is_demo,
+                              is_hidden, hidden_reason)
+  values (uid, uid, v_name, v_cat.id, v_sub, v_topic, v_title, v_desc, v_sol, v_freq, v_geom, v_kind, v_variant, false,
+          v_cat.requires_approval, case when v_cat.requires_approval then 'pending_approval' end)
   returning id, public_no into v_id, v_no;
 
   perform public._attach_photos(v_id, null, p->'photos', uid);
 
-  return jsonb_build_object('id', v_id, 'no', v_no);
+  return jsonb_build_object('id', v_id, 'no', v_no, 'pending', v_cat.requires_approval);
 end $$;
 
 -- Podpora podnětu („Také to vnímám jako problém“) / odebrání podpory
@@ -1242,7 +1247,8 @@ create or replace function public.my_reports()
 returns jsonb language sql stable security definer set search_path = public as $$
   select coalesce(jsonb_agg(jsonb_build_object(
     'id', r.id, 'no', r.public_no, 'title', r.title, 'kind', r.geom_kind, 'category_id', r.category_id,
-    'created_at', r.created_at, 'is_hidden', r.is_hidden, 'people', coalesce(pp.people, 1),
+    'created_at', r.created_at, 'is_hidden', r.is_hidden, 'pending', r.hidden_reason = 'pending_approval',
+    'custom_topic', r.custom_topic, 'people', coalesce(pp.people, 1),
     'status', case when r.status_public then r.status end) order by r.created_at desc), '[]'::jsonb)
   from public.reports r left join public.v_report_people pp on pp.report_id = r.id
   where r.author_key = auth.uid()
@@ -1405,9 +1411,10 @@ begin
       and (coalesce(p->>'visibility', 'all') = 'all'
            or (p->>'visibility' = 'visible' and not r.is_hidden and r.merged_into is null)
            or (p->>'visibility' = 'hidden' and r.is_hidden)
+           or (p->>'visibility' = 'pending' and r.hidden_reason = 'pending_approval')
            or (p->>'visibility' = 'merged' and r.merged_into is not null)
            or (p->>'visibility' = 'flagged' and exists (select 1 from public.flags f where f.report_id = r.id and f.resolved_at is null)))
-      and (coalesce(p->>'demo', 'all') = 'all' or (p->>'demo' = 'real' and not r.is_demo) or (p->>'demo' = 'demo' and r.is_demo))
+      and (coalesce(p->>'demo', 'all') = 'all' or (p->>'demo' = 'real' and not r.is_demo) or (p->>'demo' = 'demo' and r.is_demo) or (p->>'demo' = 'maphub' and r.source = 'maphub'))
       and (q is null or r.title ilike '%' || q || '%' or r.description ilike '%' || q || '%'
            or r.author_name ilike '%' || q || '%' or r.public_no::text = q)
     limit least(coalesce((p->>'limit')::int, 2000), 10000)
@@ -1668,7 +1675,7 @@ begin
   return coalesce((select jsonb_agg(jsonb_build_object(
       'id', c.id, 'code', c.code, 'name', c.name, 'description', c.description, 'color', c.color, 'icon', c.icon,
       'default_geom', c.default_geom, 'sort_order', c.sort_order, 'is_active', c.is_active,
-      'allow_custom_topic', c.allow_custom_topic, 'theme', c.theme, 'source', c.source,
+      'allow_custom_topic', c.allow_custom_topic, 'requires_approval', c.requires_approval, 'theme', c.theme, 'source', c.source,
       'reports', (select count(*) from public.reports r where r.category_id = c.id),
       'subcategories', coalesce((select jsonb_agg(jsonb_build_object('id', s.id, 'name', s.name, 'default_geom', s.default_geom,
           'sort_order', s.sort_order, 'is_active', s.is_active,
@@ -2118,7 +2125,7 @@ end $$;
 insert into public.app_settings (key, value, is_public, description) values
   ('contributions_open',        'true',  true,  'Přijímají se nové podněty'),
   ('support_requires_verified', 'true',  true,  'Podpora podnětu vyžaduje přihlášení e-mailem (ověřená identita)'),
-  ('contribute_requires_login', 'false', true,  'Přidávat podněty a komentáře mohou jen uživatelé přihlášení e-mailem (pak lze v Supabase vypnout anonymní přihlášení)'),
+  ('contribute_requires_login', 'true',  true,  'Přidávat podněty a komentáře mohou jen uživatelé přihlášení e-mailem (pak lze v Supabase vypnout anonymní přihlášení)'),
   ('show_demo',                 'false', true,  'Zobrazovat ukázková (testovací) data'),
   ('duplicate_radius_m',        '60',    true,  'Okruh hledání podobných podnětů před vložením (m)'),
   ('point_tolerance_m',         '40',    true,  'Tolerance shody bodů (m)'),
@@ -2151,53 +2158,57 @@ on conflict (key) do nothing;
 
 -- Kategorie (dle zadání; původní kategorie z mapy MapHub lze doplnit
 -- v administraci ručně nebo importem GeoJSON exportu z MapHub)
-insert into public.categories (id, code, name, description, color, icon, default_geom, sort_order, allow_custom_topic) values
-  (1, 'bezpecnost-pesich',   'Bezpečnost pěších',                   'Přechody, chodníky, nebezpečná místa pro chodce a děti', '#dc2626', 'footprints',   'point',   10, false),
-  (2, 'cyklisticka-doprava', 'Cyklistická doprava',                 'Cyklopropojení, nebezpečné úseky, stojany na kola',      '#0891b2', 'bike',         'line',    20, false),
-  (3, 'parkovani-auta',      'Parkování a automobilová doprava',    'Parkování, průjezd, rychlost, křižovatky',               '#ca8a04', 'car',          'point',   30, false),
-  (4, 'bezbarierovost',      'Bezbariérovost',                      'Bariéry, obrubníky, povrchy, přístupnost zastávek',      '#7c3aed', 'accessibility','point',   40, false),
-  (5, 'verejny-prostor',     'Veřejný prostor a zeleň',             'Stromy, stín, mobiliář, místa k odpočinku a revitalizaci','#16a34a', 'trees',        'polygon', 50, false),
-  (6, 'prostupnost',         'Prostupnost a propojení města',       'Chybějící propojení, průchody, nové trasy',              '#ea580c', 'route',        'line',    60, false),
-  (7, 'jine',                'Jiné / vlastní podnět',               'Téma, které není obsaženo v předchozích kategoriích',    '#64748b', 'message-circle','point',  70, true)
+insert into public.categories (id, code, name, description, color, icon, default_geom, sort_order, allow_custom_topic, requires_approval) values
+  (1, 'nebezpecna-mista',   'Nebezpečná místa',                      'Přechody, chodníky, křižovatky a úseky nebezpečné pro pěší a cyklisty', '#dc2626', 'shield',         'point',   10, false, false),
+  (2, 'cyklisticka-doprava','Cyklistická doprava',                   'Chybějící cyklotrasy, napojení, stojany na kola',                       '#0891b2', 'bike',           'line',    20, false, false),
+  (3, 'parkovani-auta',     'Parkování a automobilová doprava',      'Parkování, průjezd, rychlost aut, křižovatky',                          '#ea580c', 'car',            'point',   30, false, false),
+  (4, 'bariery',            'Bariéry a přerušené trasy',             'Chybějící propojení a průchody, bariéry, nepřístupná místa',            '#7c3aed', 'route',          'line',    40, false, false),
+  (5, 'neprijemna-mista',   'Nepříjemná místa a pocit bezpečí',     'Kde se necítíte dobře nebo bezpečně a co tam chybí',                     '#ca8a04', 'bench',          'polygon', 50, false, false),
+  (6, 'prijemna-mista',     'Příjemná místa a trasy',                'Kudy a kde se chodí a jezdí dobře – co zachovat a rozvíjet',            '#16a34a', 'trees',          'line',    60, false, false),
+  (7, 'navrh-kategorie',    'Návrh nové kategorie',                  'Chybí vám kategorie? Navrhněte ji a zakreslete místo – zobrazí se po schválení správcem', '#64748b', 'lightbulb', 'point', 1000, true, true)
 on conflict (id) do nothing;
 select setval(pg_get_serial_sequence('public.categories', 'id'), greatest((select max(id) from public.categories), 1));
 
 insert into public.subcategories (category_id, name, default_geom, sort_order) values
-  (1, 'Chybějící přechod', 'point', 10),
-  (1, 'Nebezpečný přechod', 'point', 20),
+  (1, 'Nebezpečný přechod', 'point', 10),
+  (1, 'Chybějící přechod', 'point', 20),
   (1, 'Nebezpečné místo pro chodce', 'point', 30),
-  (1, 'Chybějící chodník', 'line', 40),
-  (1, 'Špatně osvětlené místo', 'point', 50),
-  (1, 'Nebezpečné místo pro děti', 'point', 60),
+  (1, 'Chybějící nebo úzký chodník', 'line', 40),
+  (1, 'Nebezpečný úsek pro cyklisty', 'line', 50),
+  (1, 'Nebezpečné místo pro děti', 'point', 90),
   (2, 'Chybějící cyklopropojení', 'line', 10),
-  (2, 'Nebezpečný úsek pro cyklisty', 'line', 20),
-  (2, 'Chybějící cyklistická infrastruktura', 'line', 30),
-  (2, 'Problematické napojení na cyklotrasu', 'point', 40),
-  (2, 'Chybějící stojany na kola', 'point', 50),
-  (2, 'Konflikt pěších a cyklistů', 'point', 60),
+  (2, 'Chybějící cyklistická infrastruktura', 'line', 20),
+  (2, 'Problematické napojení na cyklotrasu', 'point', 30),
+  (2, 'Chybějící stojany na kola', 'point', 40),
+  (2, 'Konflikt pěších a cyklistů', 'point', 50),
   (3, 'Nedostatek parkovacích míst', 'polygon', 10),
   (3, 'Nevhodně organizované parkování', 'polygon', 20),
   (3, 'Nelegální nebo nebezpečné parkování', 'point', 30),
   (3, 'Problematický průjezd', 'line', 40),
   (3, 'Nadměrná rychlost', 'line', 50),
   (3, 'Konfliktní křižovatka', 'point', 60),
-  (4, 'Chybějící bezbariérový přístup', 'point', 10),
-  (4, 'Vysoký obrubník', 'point', 20),
-  (4, 'Nevhodný povrch', 'line', 30),
-  (4, 'Nepřístupná zastávka', 'point', 40),
-  (4, 'Bariéra v pěší trase', 'point', 50),
-  (5, 'Chybějící stromy a stín', 'polygon', 10),
-  (5, 'Nevhodné povrchy', 'polygon', 20),
-  (5, 'Chybějící mobiliář', 'point', 30),
-  (5, 'Nevhodné nebo nevyužité veřejné prostranství', 'polygon', 40),
-  (5, 'Místo vhodné k revitalizaci', 'polygon', 50),
-  (5, 'Nedostatek míst k odpočinku', 'point', 60),
-  (6, 'Chybějící pěší propojení', 'line', 10),
-  (6, 'Chybějící cyklistické propojení', 'line', 20),
-  (6, 'Chybějící průchod', 'point', 30),
-  (6, 'Přerušená pěší trasa', 'line', 40),
-  (6, 'Chybějící propojení s krajinou', 'line', 50),
-  (6, 'Potenciál pro novou trasu', 'line', 60)
+  (4, 'Přerušená trasa', 'line', 10),
+  (4, 'Chybějící pěší propojení', 'line', 20),
+  (4, 'Chybějící průchod', 'point', 30),
+  (4, 'Chybějící propojení s krajinou', 'line', 40),
+  (4, 'Chybějící bezbariérový přístup', 'point', 50),
+  (4, 'Vysoký obrubník', 'point', 60),
+  (4, 'Nevhodný povrch', 'line', 70),
+  (4, 'Nepřístupná zastávka', 'point', 80),
+  (5, 'Nepříjemné nebo odpuzující místo', 'polygon', 10),
+  (5, 'Necítím se tu bezpečně (ve dne nebo v noci)', 'point', 20),
+  (5, 'Neosvětlené nebo špatně osvětlené místo', 'point', 30),
+  (5, 'Opuštěné místo, podchod nebo zákoutí', 'point', 40),
+  (5, 'Nedostatečná obytnost', 'polygon', 50),
+  (5, 'Chybějící stromy a stín', 'polygon', 60),
+  (5, 'Chybějící lavičky a mobiliář', 'point', 70),
+  (5, 'Nevyužité prostranství / místo k revitalizaci', 'polygon', 80),
+  (5, 'Hluk a provoz aut', 'polygon', 90),
+  (6, 'Příjemná pěší trasa', 'line', 10),
+  (6, 'Příjemná cyklotrasa', 'line', 20),
+  (6, 'Příjemné místo k pobytu', 'polygon', 30),
+  (6, 'Zeleň a příroda', 'polygon', 40),
+  (6, 'Místo, které stojí za zachování', 'point', 50)
 on conflict (category_id, name) do nothing;
 
 -- Místní části (orientační středy; přesné hranice katastrálních území lze
@@ -2348,4 +2359,176 @@ join public.categories c on c.code = v.cat_code
 on conflict (id) do nothing;
 
 refresh materialized view public.report_metrics;
+
+-- >>> 20261121000900_categories_v2.sql
+-- =====================================================================
+-- Sjednocené kategorie (6) + „Návrh nové kategorie“ se schválením správcem
+--   1 Nebezpečná místa · 2 Cyklistická doprava · 3 Parkování a automobilová doprava
+--   4 Bariéry a přerušené trasy · 5 Nepříjemná místa a pocit bezpečí
+--   6 Příjemná místa a trasy · 7 Návrh nové kategorie (podnět čeká na schválení)
+-- Převod je bezpečný pro již běžící databázi a lze ho spustit opakovaně:
+--   • podněty ze starých kategorií a podkategorií se přesunou do nových,
+--   • zakreslení z původní mapy MapHub se zařadí do nových kategorií
+--     (kategorii i podkategorii lze pak ručně upravit v administraci),
+--   • původní kategorie MapHub se skryjí (nemažou).
+-- =====================================================================
+
+alter table public.categories add column if not exists requires_approval boolean not null default false;
+
+select set_config('app.skip_metrics', 'on', false);
+
+do $$
+begin
+  -- převod jen u databází se starým rozdělením (z první verze aplikace)
+  if exists (select 1 from public.categories where code in ('bezpecnost-pesich', 'prostupnost')) then
+    insert into public.subcategories (category_id, name, default_geom, sort_order) values
+      (1, 'Nebezpečný přechod', 'point', 10), (1, 'Chybějící přechod', 'point', 20),
+      (1, 'Nebezpečné místo pro chodce', 'point', 30), (1, 'Chybějící nebo úzký chodník', 'line', 40),
+      (1, 'Nebezpečný úsek pro cyklisty', 'line', 50), (1, 'Nebezpečné místo pro děti', 'point', 90),
+      (2, 'Chybějící cyklopropojení', 'line', 10), (2, 'Chybějící cyklistická infrastruktura', 'line', 20),
+      (2, 'Problematické napojení na cyklotrasu', 'point', 30), (2, 'Chybějící stojany na kola', 'point', 40),
+      (2, 'Konflikt pěších a cyklistů', 'point', 50),
+      (4, 'Přerušená trasa', 'line', 10), (4, 'Chybějící pěší propojení', 'line', 20),
+      (4, 'Chybějící průchod', 'point', 30), (4, 'Chybějící propojení s krajinou', 'line', 40),
+      (4, 'Chybějící bezbariérový přístup', 'point', 50), (4, 'Vysoký obrubník', 'point', 60),
+      (4, 'Nevhodný povrch', 'line', 70), (4, 'Nepřístupná zastávka', 'point', 80),
+      (5, 'Nepříjemné nebo odpuzující místo', 'polygon', 10), (5, 'Necítím se tu bezpečně (ve dne nebo v noci)', 'point', 20),
+      (5, 'Neosvětlené nebo špatně osvětlené místo', 'point', 30), (5, 'Opuštěné místo, podchod nebo zákoutí', 'point', 40),
+      (5, 'Nedostatečná obytnost', 'polygon', 50), (5, 'Chybějící stromy a stín', 'polygon', 60),
+      (5, 'Chybějící lavičky a mobiliář', 'point', 70), (5, 'Nevyužité prostranství / místo k revitalizaci', 'polygon', 80),
+      (5, 'Hluk a provoz aut', 'polygon', 90)
+    on conflict (category_id, name) do nothing;
+
+    -- přesun podnětů podle podkategorie: (stará kat., stará podkat.) → (nová kat., nová podkat.)
+    with m(oc, osub, nc, nsub) as (values
+      (1, 'Chybějící chodník',                         1, 'Chybějící nebo úzký chodník'),
+      (1, 'Špatně osvětlené místo',                    5, 'Neosvětlené nebo špatně osvětlené místo'),
+      (2, 'Nebezpečný úsek pro cyklisty',              1, 'Nebezpečný úsek pro cyklisty'),
+      (4, 'Bariéra v pěší trase',                      4, 'Přerušená trasa'),
+      (5, 'Nevhodné povrchy',                          5, null),
+      (5, 'Chybějící mobiliář',                        5, 'Chybějící lavičky a mobiliář'),
+      (5, 'Nedostatek míst k odpočinku',               5, 'Chybějící lavičky a mobiliář'),
+      (5, 'Nevhodné nebo nevyužité veřejné prostranství', 5, 'Nevyužité prostranství / místo k revitalizaci'),
+      (5, 'Místo vhodné k revitalizaci',               5, 'Nevyužité prostranství / místo k revitalizaci'),
+      (6, 'Chybějící pěší propojení',                  4, 'Chybějící pěší propojení'),
+      (6, 'Chybějící cyklistické propojení',           2, 'Chybějící cyklopropojení'),
+      (6, 'Chybějící průchod',                         4, 'Chybějící průchod'),
+      (6, 'Přerušená pěší trasa',                      4, 'Přerušená trasa'),
+      (6, 'Chybějící propojení s krajinou',            4, 'Chybějící propojení s krajinou'),
+      (6, 'Potenciál pro novou trasu',                 4, 'Chybějící pěší propojení'))
+    update public.reports r
+       set category_id = m.nc,
+           subcategory_id = (select s2.id from public.subcategories s2 where s2.category_id = m.nc and s2.name = m.nsub)
+      from m
+      join public.subcategories s on s.category_id = m.oc and s.name = m.osub
+     where r.category_id = m.oc and r.subcategory_id = s.id;
+
+    -- zbylé podněty z „Prostupnosti“ (kategorie 6 bude „Příjemná místa a trasy“)
+    update public.reports set category_id = 4, subcategory_id = null where category_id = 6;
+
+    -- staré podkategorie, které v novém rozdělení nejsou
+    delete from public.subcategories s
+     where s.category_id in (1, 2, 4, 5, 6)
+       and (s.category_id, s.name) not in (
+         select category_id, name from (values
+           (1,'Nebezpečný přechod'),(1,'Chybějící přechod'),(1,'Nebezpečné místo pro chodce'),(1,'Chybějící nebo úzký chodník'),
+           (1,'Nebezpečný úsek pro cyklisty'),(1,'Nebezpečné místo pro děti'),
+           (2,'Chybějící cyklopropojení'),(2,'Chybějící cyklistická infrastruktura'),(2,'Problematické napojení na cyklotrasu'),
+           (2,'Chybějící stojany na kola'),(2,'Konflikt pěších a cyklistů'),
+           (4,'Přerušená trasa'),(4,'Chybějící pěší propojení'),(4,'Chybějící průchod'),(4,'Chybějící propojení s krajinou'),
+           (4,'Chybějící bezbariérový přístup'),(4,'Vysoký obrubník'),(4,'Nevhodný povrch'),(4,'Nepřístupná zastávka'),
+           (5,'Nepříjemné nebo odpuzující místo'),(5,'Necítím se tu bezpečně (ve dne nebo v noci)'),
+           (5,'Neosvětlené nebo špatně osvětlené místo'),(5,'Opuštěné místo, podchod nebo zákoutí'),
+           (5,'Nedostatečná obytnost'),(5,'Chybějící stromy a stín'),(5,'Chybějící lavičky a mobiliář'),
+           (5,'Nevyužité prostranství / místo k revitalizaci'),(5,'Hluk a provoz aut')
+         ) as keep(category_id, name));
+
+    update public.categories c set code = v.code, name = v.name, description = v.descr, color = v.color, icon = v.icon,
+           default_geom = v.geom::public.geom_kind, sort_order = v.ord, is_active = true, allow_custom_topic = v.custom,
+           requires_approval = v.approval, updated_at = now()
+      from (values
+        (1, 'nebezpecna-mista',   'Nebezpečná místa',                 'Přechody, chodníky a úseky, kde hrozí úraz nebo srážka',        '#dc2626', 'shield',    'point',   10, false, false),
+        (2, 'cyklisticka-doprava','Cyklistická doprava',              'Chybějící cyklotrasy, napojení, stojany na kola',               '#0891b2', 'bike',      'line',    20, false, false),
+        (3, 'parkovani-auta',     'Parkování a automobilová doprava', 'Parkování, průjezd, rychlost aut, křižovatky',                  '#ea580c', 'car',       'point',   30, false, false),
+        (4, 'bariery',            'Bariéry a přerušené trasy',        'Kudy se nedá projít nebo projet – nebo jen obtížně',            '#7c3aed', 'route',     'line',    40, false, false),
+        (5, 'neprijemna-mista',   'Nepříjemná místa a pocit bezpečí', 'Kde se necítíte dobře nebo bezpečně a co tam chybí',            '#ca8a04', 'bench',     'polygon', 50, false, false),
+        (6, 'prijemna-mista',     'Příjemná místa a trasy',           'Co funguje dobře a stojí za zachování',                         '#16a34a', 'trees',     'line',    60, false, false),
+        (7, 'navrh-kategorie',    'Návrh nové kategorie',             'Chybí vám kategorie? Navrhněte ji a zakreslete místo – zobrazí se po schválení správcem', '#64748b', 'lightbulb', 'point', 1000, true, true)
+      ) as v(id, code, name, descr, color, icon, geom, ord, custom, approval)
+     where c.id = v.id;
+
+    -- dosavadní „Jiné / vlastní podnět“ → čeká na schválení správcem
+    update public.reports set is_hidden = true, hidden_reason = 'pending_approval'
+     where category_id = 7 and not is_hidden and custom_topic is not null;
+    update public.reports set category_id = 1, subcategory_id = null
+     where category_id = 7 and custom_topic is null;
+
+    insert into public.subcategories (category_id, name, default_geom, sort_order) values
+      (6, 'Příjemná pěší trasa', 'line', 10), (6, 'Příjemná cyklotrasa', 'line', 20),
+      (6, 'Příjemné místo k pobytu', 'polygon', 30), (6, 'Zeleň a příroda', 'polygon', 40),
+      (6, 'Místo, které stojí za zachování', 'point', 50)
+    on conflict (category_id, name) do nothing;
+  end if;
+end $$;
+
+-- Zakreslení z původní mapy MapHub → nové kategorie (jen ta, která ještě zůstala
+-- v původních skupinách; ručně přeřazené podněty se nemění)
+with m(code, nc, nsub) as (values
+  ('maphub-4012865806', 1, null),
+  ('maphub-1164403015', 5, 'Nepříjemné nebo odpuzující místo'),
+  ('maphub-3919024396', 5, 'Nedostatečná obytnost'),
+  ('maphub-3687981227', 4, 'Přerušená trasa'),
+  ('maphub-78187723',   6, null))
+update public.reports r
+   set category_id = m.nc,
+       subcategory_id = coalesce(
+         (select s.id from public.subcategories s where s.category_id = m.nc and s.name = m.nsub),
+         case when m.nc = 6 then (select s.id from public.subcategories s where s.category_id = 6 and s.name =
+           case when r.geom_kind = 'polygon' then 'Příjemné místo k pobytu'
+                when r.title ilike '%cyklo%' then 'Příjemná cyklotrasa'
+                when r.geom_kind = 'line' then 'Příjemná pěší trasa'
+                else 'Místo, které stojí za zachování' end) end)
+  from m join public.categories c on c.code = m.code
+ where r.category_id = c.id;
+
+update public.categories set is_active = false, updated_at = now()
+ where code in ('maphub-4012865806', 'maphub-1164403015', 'maphub-3919024396', 'maphub-3687981227', 'maphub-78187723');
+
+select set_config('app.skip_metrics', 'off', false);
+refresh materialized view public.report_metrics;
+
+-- =====================================================================
+-- Schválení návrhu nové kategorie správcem
+--   p_category_id = null → vytvoří se nová kategorie (název z návrhu nebo p_name)
+--   p_category_id = id   → podnět se zařadí do existující kategorie
+-- Podnět se v obou případech zveřejní.
+-- =====================================================================
+create or replace function public.admin_approve_proposal(p_id uuid, p_category_id integer, p_name text, p_color text)
+returns jsonb language plpgsql security definer set search_path = public as $$
+declare admin uuid := public._require_admin(); r public.reports; v_cat integer := p_category_id; v_name text;
+begin
+  select * into r from public.reports where id = p_id for update;
+  if not found then raise exception 'not_found' using errcode = 'P0001'; end if;
+  if v_cat is null then
+    v_name := coalesce(public._clean(p_name, 120), r.custom_topic);
+    if v_name is null then raise exception 'topic_required' using errcode = 'P0001'; end if;
+    select id into v_cat from public.categories where lower(name) = lower(v_name) and not requires_approval limit 1;
+    if v_cat is null then
+      insert into public.categories (name, description, color, icon, default_geom, sort_order)
+      values (v_name, null, coalesce(nullif(p_color, ''), '#0d9488'), 'map-pin', r.geom_kind,
+              (select coalesce(max(sort_order), 0) + 10 from public.categories where not requires_approval and sort_order < 1000))
+      returning id into v_cat;
+    end if;
+  elsif not exists (select 1 from public.categories where id = v_cat and not requires_approval) then
+    raise exception 'category_required' using errcode = 'P0001';
+  end if;
+  update public.reports set category_id = v_cat, subcategory_id = null, is_hidden = false, hidden_reason = null
+   where id = p_id;
+  insert into public.audit_log (actor, action, target_type, target_id, new_data)
+  values (admin, 'approve_proposal', 'report', p_id::text, jsonb_build_object('category_id', v_cat, 'topic', r.custom_topic));
+  return jsonb_build_object('category_id', v_cat);
+end $$;
+
+revoke execute on function public.admin_approve_proposal(uuid, integer, text, text) from public, anon;
+grant execute on function public.admin_approve_proposal(uuid, integer, text, text) to authenticated;
 

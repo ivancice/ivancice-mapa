@@ -1,7 +1,7 @@
 'use client';
 import { useCallback, useEffect, useState } from 'react';
 import clsx from 'clsx';
-import { Camera, Flag, GitBranch, MapPin, Pencil, Share2, ThumbsUp, Trash2, Users, X } from 'lucide-react';
+import { Camera, ChevronDown, Flag, GitBranch, MapPin, Pencil, Share2, ThumbsUp, Trash2, Users, X } from 'lucide-react';
 import type { MyProfile, NearbyReport, PublicConfig, ReportDetail as RD } from '@/lib/types';
 import { FREQUENCY_LABEL, KIND_LABEL, STATUS_COLOR, STATUS_LABEL } from '@/lib/types';
 import { api, errorMessage } from '@/lib/api';
@@ -147,43 +147,42 @@ export function ReportDetailPanel({
   if (loading) return <Sheet open onClose={onClose}><div className="flex justify-center py-10"><Spinner /></div></Sheet>;
   if (missing || !r) return <Sheet open onClose={onClose} title="Podnět nenalezen"><p className="text-sm text-ink-soft">Podnět neexistuje, byl skryt správcem nebo stažen autorem.</p></Sheet>;
 
+  const photosOn = config.settings.photos_enabled !== false;
   return (
     <Sheet open onClose={onClose} wide z={35}
       title={
-        <div className="flex items-start gap-3">
-          {cat && <CategoryBadge color={cat.color} icon={cat.icon} />}
-          <div className="min-w-0">
-            <div className="text-xs font-semibold uppercase tracking-wide" style={{ color: cat?.color }}>{cat?.name}{sub ? ` · ${sub.name}` : ''}</div>
-            <div className="mt-0.5">{r.title}</div>
-          </div>
-        </div>
-      }
-      footer={
-        <div className="flex items-center gap-2">
-          <Button variant={r.my_support ? 'outline' : 'primary'} className="flex-1" onClick={toggleSupport} loading={busy} disabled={r.is_mine} aria-pressed={r.my_support}>
-            <ThumbsUp className={clsx('h-4 w-4', r.my_support && 'fill-current')} />
-            {r.is_mine ? 'Váš podnět' : r.my_support ? 'Podpořeno – odebrat' : 'Také to vnímám jako problém'}
-          </Button>
-          <Button variant="outline" onClick={share} aria-label="Sdílet"><Share2 className="h-4 w-4" /></Button>
+        <div className="flex flex-col items-center pl-7 text-center">
+          {cat && <CategoryBadge color={cat.color} icon={cat.icon} size="lg" />}
+          <div className="mt-2 text-xs font-semibold" style={{ color: cat?.color }}>{cat?.name}</div>
+          <div className="mt-0.5 text-xl leading-snug">{r.title}</div>
+          {(r.district || (sub && sub.name !== r.title)) && (
+            <div className="mt-1 flex items-center gap-1 text-sm font-normal text-ink-soft">
+              <MapPin className="h-3.5 w-3.5 shrink-0" />{[r.district, sub && sub.name !== r.title ? sub.name : null].filter(Boolean).join(' · ')}
+            </div>
+          )}
         </div>
       }
     >
       {r.is_demo && <div className="mb-3 rounded-xl bg-amber-100 px-3 py-2 text-xs font-semibold text-amber-900">UKÁZKOVÝ PODNĚT – testovací data, nejde o skutečný příspěvek obyvatel.</div>}
       {r.is_hidden && <div className="mb-3 rounded-xl bg-slate-200 px-3 py-2 text-xs font-semibold">Tento podnět je skrytý a veřejnost ho nevidí.</div>}
 
-      <div className="flex items-center gap-3 rounded-2xl bg-slate-50 p-3">
-        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-2xl bg-white text-xl font-extrabold shadow-sm" style={{ color: cat?.color }}>{r.people}</div>
-        <div className="text-sm leading-snug">
-          <b>{r.people} {plural(r.people, 'člověk to vnímá', 'lidé to vnímají', 'lidí to vnímá')} jako problém</b>
-          <div className="text-ink-soft">
-            {r.authors} {plural(r.authors, 'autor', 'autoři', 'autorů')} zakreslení · {r.supporters} {plural(r.supporters, 'podpora', 'podpory', 'podpor')}
-            {r.merged_count > 0 && ` · sloučeno ${r.merged_count} ${plural(r.merged_count, 'duplicitní podnět', 'duplicitní podněty', 'duplicitních podnětů')}`}
-          </div>
+      <div className="mt-2 flex items-center gap-3 rounded-2xl p-3" style={{ backgroundColor: `${cat?.color ?? '#64748b'}1f` }}>
+        <div className="min-w-[2rem] text-center text-2xl font-extrabold" style={{ color: cat?.color }}>{r.people}</div>
+        <div className="min-w-0 flex-1 text-sm leading-snug">
+          <b>{plural(r.people, 'člověk to vnímá', 'lidé to vnímají', 'lidí to vnímá')} jako problém</b>
+          <div className="text-xs text-ink-soft">{r.supporters} {plural(r.supporters, 'podpora', 'podpory', 'podpor')}{r.merged_count > 0 && ` · sloučeno ${r.merged_count}×`}</div>
         </div>
+        {r.is_mine ? (
+          <span className="shrink-0 rounded-full bg-white px-3 py-2 text-xs font-semibold text-ink-soft">Váš podnět</span>
+        ) : (
+          <Button variant={r.my_support ? 'outline' : 'primary'} className="shrink-0 rounded-full px-4 py-2" onClick={toggleSupport} loading={busy} aria-pressed={r.my_support}>
+            <ThumbsUp className={clsx('h-4 w-4', r.my_support && 'fill-current')} /> {r.my_support ? 'Podpořeno' : 'Podpořit'}
+          </Button>
+        )}
       </div>
 
       {r.status && (
-        <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+        <div className="mt-3 flex flex-wrap items-center justify-center gap-2 text-sm">
           <span className="rounded-full px-2.5 py-1 text-xs font-bold text-white" style={{ backgroundColor: STATUS_COLOR[r.status] }}>{STATUS_LABEL[r.status]}</span>
           {r.status_note && <span className="text-ink-soft">{r.status_note}</span>}
         </div>
@@ -198,32 +197,57 @@ export function ReportDetailPanel({
         </div>
       )}
 
-      {r.photos.length > 0 && (
+      {(r.photos.length > 0 || photosOn) && (
         <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
           {r.photos.map((p) => (
-            <button key={p.id} onClick={() => setPhoto(p.path)} className="relative h-28 w-36 shrink-0 overflow-hidden rounded-xl bg-slate-100">
+            <button key={p.id} onClick={() => setPhoto(p.path)} className="relative h-24 w-32 shrink-0 overflow-hidden rounded-xl bg-slate-100">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={photoUrl(p.path)} alt="Fotografie místa" className="h-full w-full object-cover" loading="lazy" />
             </button>
           ))}
+          {photosOn && (
+            <button onClick={() => { document.getElementById('comment-photo')?.click(); }}
+              className="flex h-24 w-32 shrink-0 flex-col items-center justify-center gap-1 rounded-xl border-2 border-dashed border-slate-300 text-xs text-ink-soft hover:border-brand-500 hover:text-brand-700">
+              <Camera className="h-5 w-5" /> Přidat fotografii
+            </button>
+          )}
         </div>
       )}
 
-      <dl className="mt-4 grid grid-cols-2 gap-x-3 gap-y-2 text-sm">
-        <div><dt className="text-xs text-ink-faint">Autor</dt><dd className="font-medium">{r.author_name}</dd></div>
-        <div><dt className="text-xs text-ink-faint">Vloženo</dt><dd className="font-medium">{formatDate(r.created_at)} · č. {r.no}</dd></div>
-        <div><dt className="text-xs text-ink-faint">Zakreslení</dt><dd className="font-medium">{KIND_LABEL[r.kind]} {r.length_m ? `· ${formatLength(r.length_m)}` : ''}{r.area_m2 ? `· ${formatArea(r.area_m2)}` : ''}</dd></div>
-        {r.district && <div><dt className="text-xs text-ink-faint">Místní část</dt><dd className="font-medium">{r.district}</dd></div>}
-        {r.frequency && <div><dt className="text-xs text-ink-faint">Autor se zde pohybuje</dt><dd className="font-medium">{FREQUENCY_LABEL[r.frequency]}</dd></div>}
-        <div>
-          <dt className="text-xs text-ink-faint">Prostorová shoda</dt>
-          <dd className="font-medium">
-            {r.overlap_people > 0
-              ? `${r.overlap_people} ${plural(r.overlap_people, 'další člověk', 'další lidé', 'dalších lidí')} zakreslilo totéž${r.agreement != null ? ` (${Math.round(r.agreement * 100)} %)` : ''}`
-              : 'zatím bez shody'}
-          </dd>
+      <div className="mt-3 grid grid-cols-2 gap-2">
+        <Button variant="outline" onClick={() => onCreateVariant(r)} className="text-xs sm:text-sm" title="Vidíte-li rozsah nebo trasu jinak, zakreslete vlastní variantu. Původní zakreslení zůstane zachováno.">
+          <GitBranch className="h-4 w-4" /> Zakreslit po svém
+        </Button>
+        <Button variant="outline" onClick={showAround} className="text-xs sm:text-sm" title="Ukáže další zakreslení do 150 m">
+          <Users className="h-4 w-4" /> {around ? 'Skrýt okolí' : 'Další zakreslení zde'}
+        </Button>
+      </div>
+
+      <details className="group mt-3 border-y border-slate-100">
+        <summary className="flex cursor-pointer list-none items-center justify-between py-3 text-sm font-semibold [&::-webkit-details-marker]:hidden">
+          Podrobnosti <ChevronDown className="h-4 w-4 transition group-open:rotate-180" />
+        </summary>
+        <dl className="divide-y divide-slate-100 pb-2 text-sm">
+          <div className="flex justify-between gap-3 py-1.5"><dt className="text-ink-soft">Autor</dt><dd className="text-right font-medium">{r.author_name}</dd></div>
+          <div className="flex justify-between gap-3 py-1.5"><dt className="text-ink-soft">Vloženo</dt><dd className="text-right font-medium">{formatDate(r.created_at)} · č. {r.no}</dd></div>
+          <div className="flex justify-between gap-3 py-1.5"><dt className="text-ink-soft">Zakreslení</dt><dd className="text-right font-medium">{KIND_LABEL[r.kind]}{r.length_m ? ` · ${formatLength(r.length_m)}` : ''}{r.area_m2 ? ` · ${formatArea(r.area_m2)}` : ''}</dd></div>
+          {r.frequency && <div className="flex justify-between gap-3 py-1.5"><dt className="text-ink-soft">Autor se zde pohybuje</dt><dd className="text-right font-medium">{FREQUENCY_LABEL[r.frequency]}</dd></div>}
+          <div className="flex justify-between gap-3 py-1.5"><dt className="text-ink-soft">Autoři zakreslení</dt><dd className="text-right font-medium">{r.authors}</dd></div>
+          <div className="flex justify-between gap-3 py-1.5">
+            <dt className="text-ink-soft">Prostorová shoda</dt>
+            <dd className="text-right font-medium">
+              {r.overlap_people > 0
+                ? `${r.overlap_people} ${plural(r.overlap_people, 'další člověk', 'další lidé', 'dalších lidí')} zakreslilo totéž${r.agreement != null ? ` (${Math.round(r.agreement * 100)} %)` : ''}`
+                : 'zatím bez shody'}
+            </dd>
+          </div>
+        </dl>
+        <div className="flex justify-center gap-1 pb-3">
+          <Button variant="ghost" onClick={() => onZoom(r)} className="text-xs"><MapPin className="h-4 w-4" /> Přiblížit</Button>
+          <Button variant="ghost" onClick={share} className="text-xs"><Share2 className="h-4 w-4" /> Sdílet</Button>
+          <Button variant="ghost" onClick={() => setFlagOpen({})} className="text-xs"><Flag className="h-4 w-4" /> Nahlásit</Button>
         </div>
-      </dl>
+      </details>
 
       {r.variant_of && (
         <p className="mt-3 text-sm">Varianta k podnětu: <button className="font-semibold text-brand-700 underline" onClick={() => onOpen(r.variant_of!.id)}>{r.variant_of.title}</button></p>
@@ -238,14 +262,6 @@ export function ReportDetailPanel({
           </ul>
         </div>
       )}
-
-      <div className="mt-4 grid grid-cols-2 gap-2">
-        <Button variant="outline" onClick={() => onCreateVariant(r)} className="text-xs sm:text-sm"><GitBranch className="h-4 w-4" /> Zakreslit po svém</Button>
-        <Button variant="outline" onClick={showAround} className="text-xs sm:text-sm"><Users className="h-4 w-4" /> {around ? 'Skrýt okolí' : 'Další zakreslení zde'}</Button>
-        <Button variant="ghost" onClick={() => onZoom(r)} className="text-xs sm:text-sm"><MapPin className="h-4 w-4" /> Přiblížit</Button>
-        <Button variant="ghost" onClick={() => setFlagOpen({})} className="text-xs sm:text-sm"><Flag className="h-4 w-4" /> Nahlásit</Button>
-      </div>
-      <p className="mt-2 text-xs text-ink-soft">„Zakreslit po svém“ – vidíte-li rozsah nebo trasu jinak, zakreslete vlastní variantu. Původní zakreslení zůstane zachováno.</p>
 
       {around && (
         <div className="mt-3 rounded-2xl border border-slate-200 p-3">
@@ -299,17 +315,16 @@ export function ReportDetailPanel({
           ))}
         </ul>
         <form onSubmit={sendComment} className="mt-3 space-y-2">
-          <textarea className={clsx(inputCls, 'min-h-[70px]')} placeholder="Přidat komentář nebo vlastní zkušenost…" value={comment} onChange={(e) => setComment(e.target.value)} maxLength={2000} />
-          {comment && (
-            <div className="flex flex-wrap items-center gap-2">
-              <input className={clsx(inputCls, 'w-auto flex-1')} placeholder="Jméno nebo přezdívka *" value={cName} onChange={(e) => setCName(e.target.value)} maxLength={60} />
-              {config.settings.photos_enabled !== false && <label className="inline-flex cursor-pointer items-center gap-1 rounded-xl border border-slate-300 px-3 py-2.5 text-sm">
-                <Camera className="h-4 w-4" /> {cFile ? '1 foto' : 'Foto'}
-                <input type="file" accept="image/*" className="hidden" onChange={(e) => setCFile(e.target.files?.[0] ?? null)} />
-              </label>}
-              <Button type="submit" variant="primary" loading={cBusy}>Odeslat</Button>
-            </div>
-          )}
+          <textarea className={clsx(inputCls, 'min-h-[70px]')} placeholder={photosOn ? 'Přidat komentář, zkušenost nebo fotografii…' : 'Přidat komentář nebo vlastní zkušenost…'} value={comment} onChange={(e) => setComment(e.target.value)} maxLength={2000} />
+          {cFile && <p className="text-xs text-ink-soft">Připojena fotografie: {cFile.name} – napište k ní krátký komentář a odešlete. <button type="button" className="underline" onClick={() => setCFile(null)}>Odebrat</button></p>}
+          <div className="flex flex-wrap items-center gap-2">
+            {(comment || cFile) && <input className={clsx(inputCls, 'w-auto flex-1')} placeholder="Jméno nebo přezdívka *" value={cName} onChange={(e) => setCName(e.target.value)} maxLength={60} />}
+            {photosOn && <label className="inline-flex cursor-pointer items-center gap-1 rounded-xl border border-slate-300 px-3 py-2.5 text-sm">
+              <Camera className="h-4 w-4" /> {cFile ? '1 foto' : 'Přidat foto'}
+              <input id="comment-photo" type="file" accept="image/*" className="hidden" onChange={(e) => setCFile(e.target.files?.[0] ?? null)} />
+            </label>}
+            {(comment || cFile) && <Button type="submit" variant="primary" loading={cBusy}>Odeslat</Button>}
+          </div>
         </form>
       </section>
 

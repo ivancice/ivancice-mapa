@@ -15,7 +15,7 @@ import { getSupabase } from '@/lib/supabase/client';
 import { distanceM } from '@/lib/geo';
 import { BASE_PATH } from '@/lib/env';
 import type { DrawGeometry, MapData, MyProfile, NearbyReport, PublicConfig, ReportDetail } from '@/lib/types';
-import { KIND_LABEL } from '@/lib/types';
+import { KIND_LABEL, visibleCategories } from '@/lib/types';
 
 const EMPTY: MapData = { type: 'FeatureCollection', features: [] };
 
@@ -44,7 +44,7 @@ export default function MapApp({ embed = false }: { embed?: boolean }) {
   const [step, setStep] = useState<Step>(null);
   const [draft, setDraft] = useState<Draft | null>(null);
   const [nearby, setNearby] = useState<NearbyReport[]>([]);
-  const [done, setDone] = useState<{ id: string; no: number } | null>(null);
+  const [done, setDone] = useState<{ id: string; no: number; pending?: boolean } | null>(null);
   const [profile, setProfile] = useState<MyProfile | null>(null);
   const [account, setAccount] = useState<{ reason?: string } | null>(null);
   const [filtersOpen, setFiltersOpen] = useState(false);
@@ -120,7 +120,7 @@ export default function MapApp({ embed = false }: { embed?: boolean }) {
   // --- analytické vrstvy ---------------------------------------------------------
   const catKey = useMemo(() => {
     if (!filters || !config) return 'all';
-    return filters.categories.size === config.categories.length ? 'all' : [...filters.categories].sort().join(',');
+    return filters.categories.size === visibleCategories(config).length ? 'all' : [...filters.categories].sort().join(',');
   }, [filters, config]);
 
   useEffect(() => {
@@ -275,7 +275,7 @@ export default function MapApp({ embed = false }: { embed?: boolean }) {
       {config && (
         <MapView
           ref={mapRef}
-          categories={config.categories}
+          categories={visibleCategories(config)}
           data={data}
           mode={mode}
           analysisLayers={layers}
@@ -336,7 +336,7 @@ export default function MapApp({ embed = false }: { embed?: boolean }) {
           <div className="flex gap-1.5">
             <button onClick={() => { setFiltersOpen(true); setSelected(null); }} className="flex items-center gap-1.5 rounded-2xl bg-white px-3 py-2 text-sm font-semibold shadow-panel">
               <ListFilter className="h-4 w-4" /> Vrstvy a filtry
-              {filters && (filters.categories.size < config.categories.length || filters.minPeople > 1 || filters.minOverlap > 0 || filters.district || filters.kinds.size < 3 || filters.status !== 'any') && <span className="h-2 w-2 rounded-full bg-orange-500" />}
+              {filters && (filters.categories.size < visibleCategories(config).length || filters.minPeople > 1 || filters.minOverlap > 0 || filters.district || filters.kinds.size < 3 || filters.status !== 'any') && <span className="h-2 w-2 rounded-full bg-orange-500" />}
             </button>
             <button onClick={() => setBasemap(basemap === 'osm' ? 'ortho' : 'osm')} className="flex items-center gap-1.5 rounded-2xl bg-white px-3 py-2 text-sm font-semibold shadow-panel" aria-label="Přepnout mapový podklad">
               {basemap === 'osm' ? <Satellite className="h-4 w-4" /> : <Layers className="h-4 w-4" />}
@@ -422,6 +422,7 @@ export default function MapApp({ embed = false }: { embed?: boolean }) {
         <SuccessModal
           id={done.id}
           no={done.no}
+          pending={done.pending}
           verified={!!profile?.is_verified}
           onClose={() => setDone(null)}
           onShow={() => { const id = done.id; setDone(null); openReport(id); }}

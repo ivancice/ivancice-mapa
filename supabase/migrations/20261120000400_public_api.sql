@@ -10,7 +10,7 @@ returns jsonb language sql stable security definer set search_path = public, ext
     'categories', coalesce((select jsonb_agg(jsonb_build_object(
         'id', c.id, 'code', c.code, 'name', c.name, 'description', c.description, 'color', c.color,
         'icon', c.icon, 'default_geom', c.default_geom, 'sort_order', c.sort_order,
-        'allow_custom_topic', c.allow_custom_topic, 'theme', c.theme, 'source', c.source,
+        'allow_custom_topic', c.allow_custom_topic, 'requires_approval', c.requires_approval, 'theme', c.theme, 'source', c.source,
         'subcategories', coalesce((select jsonb_agg(jsonb_build_object(
             'id', s.id, 'name', s.name, 'default_geom', s.default_geom, 'sort_order', s.sort_order)
             order by s.sort_order, s.id)
@@ -308,6 +308,7 @@ begin
     if v_sub is null then raise exception 'invalid_subcategory' using errcode = 'P0001'; end if;
   end if;
   if not v_cat.allow_custom_topic then v_topic := null; end if;
+  if v_cat.requires_approval and v_topic is null then raise exception 'topic_required' using errcode = 'P0001'; end if;
 
   begin
     v_kind := (p->>'kind')::public.geom_kind;
@@ -326,13 +327,15 @@ begin
   perform public._upsert_profile(uid, v_name, p->>'email', (p->>'newsletter')::boolean);
 
   insert into public.reports (user_id, author_key, author_name, category_id, subcategory_id, custom_topic,
-                              title, description, solution, frequency, geom, geom_kind, variant_of, is_demo)
-  values (uid, uid, v_name, v_cat.id, v_sub, v_topic, v_title, v_desc, v_sol, v_freq, v_geom, v_kind, v_variant, false)
+                              title, description, solution, frequency, geom, geom_kind, variant_of, is_demo,
+                              is_hidden, hidden_reason)
+  values (uid, uid, v_name, v_cat.id, v_sub, v_topic, v_title, v_desc, v_sol, v_freq, v_geom, v_kind, v_variant, false,
+          v_cat.requires_approval, case when v_cat.requires_approval then 'pending_approval' end)
   returning id, public_no into v_id, v_no;
 
   perform public._attach_photos(v_id, null, p->'photos', uid);
 
-  return jsonb_build_object('id', v_id, 'no', v_no);
+  return jsonb_build_object('id', v_id, 'no', v_no, 'pending', v_cat.requires_approval);
 end $$;
 
 -- Podpora podnětu („Také to vnímám jako problém“) / odebrání podpory
@@ -443,7 +446,8 @@ create or replace function public.my_reports()
 returns jsonb language sql stable security definer set search_path = public as $$
   select coalesce(jsonb_agg(jsonb_build_object(
     'id', r.id, 'no', r.public_no, 'title', r.title, 'kind', r.geom_kind, 'category_id', r.category_id,
-    'created_at', r.created_at, 'is_hidden', r.is_hidden, 'people', coalesce(pp.people, 1),
+    'created_at', r.created_at, 'is_hidden', r.is_hidden, 'pending', r.hidden_reason = 'pending_approval',
+    'custom_topic', r.custom_topic, 'people', coalesce(pp.people, 1),
     'status', case when r.status_public then r.status end) order by r.created_at desc), '[]'::jsonb)
   from public.reports r left join public.v_report_people pp on pp.report_id = r.id
   where r.author_key = auth.uid()

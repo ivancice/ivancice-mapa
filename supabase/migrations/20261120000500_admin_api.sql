@@ -40,9 +40,10 @@ begin
       and (coalesce(p->>'visibility', 'all') = 'all'
            or (p->>'visibility' = 'visible' and not r.is_hidden and r.merged_into is null)
            or (p->>'visibility' = 'hidden' and r.is_hidden)
+           or (p->>'visibility' = 'pending' and r.hidden_reason = 'pending_approval')
            or (p->>'visibility' = 'merged' and r.merged_into is not null)
            or (p->>'visibility' = 'flagged' and exists (select 1 from public.flags f where f.report_id = r.id and f.resolved_at is null)))
-      and (coalesce(p->>'demo', 'all') = 'all' or (p->>'demo' = 'real' and not r.is_demo) or (p->>'demo' = 'demo' and r.is_demo))
+      and (coalesce(p->>'demo', 'all') = 'all' or (p->>'demo' = 'real' and not r.is_demo) or (p->>'demo' = 'demo' and r.is_demo) or (p->>'demo' = 'maphub' and r.source = 'maphub'))
       and (q is null or r.title ilike '%' || q || '%' or r.description ilike '%' || q || '%'
            or r.author_name ilike '%' || q || '%' or r.public_no::text = q)
     limit least(coalesce((p->>'limit')::int, 2000), 10000)
@@ -303,7 +304,7 @@ begin
   return coalesce((select jsonb_agg(jsonb_build_object(
       'id', c.id, 'code', c.code, 'name', c.name, 'description', c.description, 'color', c.color, 'icon', c.icon,
       'default_geom', c.default_geom, 'sort_order', c.sort_order, 'is_active', c.is_active,
-      'allow_custom_topic', c.allow_custom_topic, 'theme', c.theme, 'source', c.source,
+      'allow_custom_topic', c.allow_custom_topic, 'requires_approval', c.requires_approval, 'theme', c.theme, 'source', c.source,
       'reports', (select count(*) from public.reports r where r.category_id = c.id),
       'subcategories', coalesce((select jsonb_agg(jsonb_build_object('id', s.id, 'name', s.name, 'default_geom', s.default_geom,
           'sort_order', s.sort_order, 'is_active', s.is_active,

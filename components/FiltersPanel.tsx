@@ -1,7 +1,7 @@
 'use client';
 import clsx from 'clsx';
 import type { GeomKind, MapData, PublicConfig, ReportStatus } from '@/lib/types';
-import { KIND_LABEL, STATUS_LABEL } from '@/lib/types';
+import { KIND_LABEL, STATUS_LABEL, visibleCategories } from '@/lib/types';
 import { CategoryBadge, inputCls, Sheet } from '@/components/ui';
 import type { AnalysisLayer } from '@/components/map/MapView';
 import { KIND_ICON } from '@/components/AddFlow';
@@ -17,7 +17,7 @@ export interface Filters {
 
 export function defaultFilters(config: PublicConfig): Filters {
   return {
-    categories: new Set(config.categories.map((c) => c.id)),
+    categories: new Set(visibleCategories(config).map((c) => c.id)),
     kinds: new Set<GeomKind>(['point', 'line', 'polygon']),
     minPeople: 1,
     minOverlap: 0,
@@ -64,7 +64,7 @@ export function FiltersPanel({
   for (const f of data.features) counts.set(f.properties.c, (counts.get(f.properties.c) ?? 0) + 1);
   const maxPeople = Math.max(1, ...data.features.map((f) => f.properties.p));
   const maxOverlap = Math.max(0, ...data.features.map((f) => f.properties.ov ?? 0));
-  const allOn = filters.categories.size === config.categories.length;
+  const allOn = filters.categories.size === visibleCategories(config).length;
 
   const toggleCat = (id: number) => {
     const s = new Set(filters.categories);
@@ -123,12 +123,12 @@ export function FiltersPanel({
       <section className="mt-5">
         <div className="mb-2 flex items-center justify-between">
           <h3 className="text-sm font-bold">Kategorie (legenda)</h3>
-          <button className="text-xs font-semibold text-brand-700" onClick={() => setFilters({ ...filters, categories: allOn ? new Set() : new Set(config.categories.map((c) => c.id)) })}>
+          <button className="text-xs font-semibold text-brand-700" onClick={() => setFilters({ ...filters, categories: allOn ? new Set() : new Set(visibleCategories(config).map((c) => c.id)) })}>
             {allOn ? 'Skrýt vše' : 'Zobrazit vše'}
           </button>
         </div>
         <div className="space-y-1">
-          {config.categories.map((c) => (
+          {visibleCategories(config).map((c) => (
             <label key={c.id} className={clsx('flex cursor-pointer items-center gap-3 rounded-xl p-1.5 hover:bg-slate-50', !filters.categories.has(c.id) && 'opacity-50')}>
               <input type="checkbox" className="h-4 w-4 accent-brand-600" checked={filters.categories.has(c.id)} onChange={() => toggleCat(c.id)} />
               <CategoryBadge color={c.color} icon={c.icon} size="sm" />

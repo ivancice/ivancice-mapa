@@ -58,11 +58,19 @@ export default function Dashboard() {
     adminApi.stats(district, demo).then(setS).catch((e) => setErr(errorMessage(e)));
   }, [district, demo]);
 
+  const [pending, setPending] = useState(0);
+  useEffect(() => { adminApi.reports({ visibility: 'pending', limit: 500 }).then((x) => setPending(x.length)).catch(() => {}); }, []);
+
   const cat = (id: number) => config.categories.find((c) => c.id === id);
   if (err) return <p className="text-red-600">{err}</p>;
 
   return (
     <div className="space-y-4">
+      {pending > 0 && (
+        <Link href="/admin/podnety/?v=pending" className="block rounded-2xl bg-amber-100 p-3 text-sm text-amber-900">
+          <b>{pending} {pending === 1 ? 'návrh nové kategorie čeká' : 'návrhů nových kategorií čeká'} na schválení.</b> Zobrazit →
+        </Link>
+      )}
       <div className="flex flex-wrap items-end gap-3">
         <h1 className="mr-auto text-xl font-extrabold">Přehled a statistiky</h1>
         <label className="text-sm font-semibold">Území
